@@ -415,7 +415,7 @@ def explain(results: list[KeyResult], ch: Chorale, cfg: dict) -> tuple[str, str]
         if ru.residual > best.residual:
             why = _residual_text(ru, cfg)
         elif ru.pre_out > best.pre_out and worst:
-            why = f"{worst} (written)"
+            why = f"it puts {worst} (written) before any octave fixes"
         elif ru.n_shifts + ru.n_tacet > best.n_shifts + best.n_tacet:
             why = (f"it needs {ru.n_shifts + ru.n_tacet} phrase shifts and rests "
                    f"instead of {best.n_shifts + best.n_tacet}")
@@ -425,10 +425,8 @@ def explain(results: list[KeyResult], ch: Chorale, cfg: dict) -> tuple[str, str]
             moved = [f"{i} on {VOICE_NAMES[v].lower()}" for i, v in ru.assign.items()
                      if best.assign.get(i) != v]
             why = ("its best voicing puts " + ", ".join(moved[:3]) + ", which suits them less") if moved                 else "its parts sit less comfortably in range"
-        short += f" Runner-up {ru.name}: {worst or _fit_phrase(ru)}."
+        short += f" Runner-up {ru.name}: {worst}." if worst and ru.pre_out > best.pre_out             else f" Runner-up {ru.name} lost: {why}."
         long += f" The runner-up, concert {ru.name}, lost because {why}."
-    if best.residual:
-        long += " No allowed key fits everyone, so this is the least-bad choice; the notes that are still out of range are listed below."
     return short, long
 
 

@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "app.py": {
+      "excludeFiles": "{tests/**,scripts/**,out/**,.venv/**,.claude/**,roster-chorale.md,README.md,docs/**}",
+      "maxDuration": 60
+    }
+  }
+}

@@ -9,7 +9,7 @@ import zipfile
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -87,11 +87,7 @@ def do_zip(body: ArrangeBody) -> Response:
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
-# Local development: serve the static page. On Vercel, public/ is served by the CDN.
-@app.get("/", include_in_schema=False)
-def index() -> FileResponse:
-    return FileResponse(ROOT / "public" / "index.html")
-
-
+# Local development: serve the static page. On Vercel, public/ is served by the CDN
+# (and isn't bundled into the function), so this mount only exists locally.
 if (ROOT / "public").is_dir():
-    app.mount("/", StaticFiles(directory=ROOT / "public"), name="static")
+    app.mount("/", StaticFiles(directory=ROOT / "public", html=True), name="static")
