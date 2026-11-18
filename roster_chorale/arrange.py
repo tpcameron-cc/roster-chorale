@@ -31,6 +31,7 @@ COST_PRE = 2            # per note that needed a phrase shift
 COST_SHIFT = 4          # per phrase shift
 COST_PREF = (0, 3, 6, 9)  # voice preference rank; anything else costs COST_UNLISTED
 COST_UNLISTED = 20
+COST_LOW_ON_MELODY = 30  # a bass instrument (tuba, bari, cello…) given the soprano line
 COST_BELOW_BASS = 500   # an upper voice octave-displaced so it sounds below the bass line (wrong harmony)
 BELOW_BASS_MARGIN = 5   # semitones an upper voice's average must stay above the bass line's average
 COST_NO_REAL_BASS = 80  # nobody plays the bass line at pitch or lower (so the harmony is inverted)
@@ -181,14 +182,19 @@ def fit(notes: list[NoteRef], base: int, lo: int, hi: int) -> Fit:
 # Assignment
 # ---------------------------------------------------------------------------
 def pref_cost(inst: Inst, v: str) -> int:
-    return COST_PREF[inst.prefs.index(v)] if v in inst.prefs else COST_UNLISTED
+    unlisted = COST_UNLISTED * (3 if inst.family == "mallets" else 1)   # bells on the bass line: no
+    c = COST_PREF[inst.prefs.index(v)] if v in inst.prefs else unlisted
+    return c + (COST_LOW_ON_MELODY if inst.low and v == "S" else 0)
 
 
 def balance_cost(assign: dict[str, str], counts: dict[str, int]) -> float:
+    """Penalty for thin voices. Mallets only double, so they don't count toward balance."""
+    counts = {i: n for i, n in counts.items() if INSTRUMENTS[i].family != "mallets"} or counts
     total = sum(counts.values())
     per = {v: 0 for v in VOICES}
     for i, v in assign.items():
-        per[v] += counts[i]
+        if i in counts:
+            per[v] += counts[i]
     target = BALANCE_SHARE * total
     return COST_THIN * sum(max(0.0, target - per[v]) for v in VOICES if per[v] > 0)
 
@@ -238,7 +244,9 @@ def assign_voices(cost: dict[tuple[str, str], float], fits: dict[tuple[str, str]
     """Exact search: choose distinct instruments to cover the required voices, everyone
     else takes their cheapest voice; then a hill-climb that also weighs balance."""
     insts = list(counts)
-    n = len(insts)
+    # Mallets double lines; they never carry a voice alone unless the group is only mallets.
+    core = [i for i in insts if INSTRUMENTS[i].family != "mallets"] or insts
+    n = len(core)
     req = required_voices(n)
     real_bass = real_bass or {i: True for i in insts}
     # optimistic per-pair cost (assumes out-of-range phrases can rest) to seed the search
@@ -257,7 +265,7 @@ def assign_voices(cost: dict[tuple[str, str], float], fits: dict[tuple[str, str]
     # For each voice, the instruments that lose least by being moved onto it (all of them for
     # small rosters). Trying these as each voice's guaranteed player keeps big orchestras fast.
     regret = {(i, v): seed[i, v] - seed[i, cheapest[i]] for i in insts for v in VOICES}
-    cands = {v: sorted(insts, key=lambda i: (regret[i, v], insts.index(i)))[:COVER_CANDIDATES] for v in VOICES}
+    cands = {v: sorted(core, key=lambda i: (regret[i, v], insts.index(i)))[:COVER_CANDIDATES] for v in VOICES}
 
     best_assign, best_total = None, float("inf")
     cover_sets = [req] if n != 3 else [["S", "B", "A"], ["S", "B", "T"]]
@@ -267,7 +275,7 @@ def assign_voices(cost: dict[tuple[str, str], float], fits: dict[tuple[str, str]
                 continue
             assign = {i: cheapest[i] for i in insts}
             assign.update(dict(zip(chosen, voices)))
-            if n <= 3 and len(set(assign.values())) < len(assign):
+            if n <= 3 and len({assign[i] for i in core}) < n:
                 continue    # with few instrument types, spread them over distinct voices
             quick = sum(seed[i, v] for i, v in assign.items())
             if quick >= best_total:   # a lower bound that can't win: skip the full evaluation
@@ -278,10 +286,12 @@ def assign_voices(cost: dict[tuple[str, str], float], fits: dict[tuple[str, str]
     assert best_assign is not None
 
     def covered_ok(a: dict[str, str]) -> bool:
-        used = set(a.values())
+        used = {a[i] for i in core}
         if not all(v in used for v in req):
             return False
-        return n > 3 or len(used) == len(a)
+        if any(a[i] not in used for i in insts if i not in core):
+            return False             # a mallet part must double a line someone else plays
+        return n > 3 or len(used) == n
 
     cur, cur_total = dict(best_assign), total_of(best_assign)
     improved = True

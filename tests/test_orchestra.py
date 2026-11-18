@@ -170,3 +170,14 @@ def test_percussion_is_listed_but_does_not_take_a_voice():
 def test_percussion_alone_errors():
     with pytest.raises(ArrangeError, match="at least one instrument"):
         arrange("bwv66.6", {"Percussion": 4, "Timpani": 1}, "1")
+
+
+@pytest.mark.parametrize("cid", ["bwv66.6", "bwv329", "bwv269"])
+def test_mallets_double_a_line_someone_else_plays(cid):
+    roster = {"Bells": 1, "Xylophone": 1, "Violin": 14, "Viola": 5, "Cello": 6, "Double Bass": 2}
+    res = arrange(cid, roster, "1", with_parts=False)
+    for v in ("Soprano", "Alto", "Tenor", "Bass"):
+        players = res["voices"][v]
+        assert players, v
+        assert any(INSTRUMENTS[i].family != "mallets" for i in players), (v, players)
+    assert "Violin" in res["voices"]["Soprano"]
