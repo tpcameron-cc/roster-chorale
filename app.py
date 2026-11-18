@@ -30,9 +30,20 @@ async def _user_error(_: Request, exc: Exception) -> JSONResponse:
     return JSONResponse({"detail": str(exc)}, status_code=400)
 
 
+def _code_version() -> str:
+    """Short fingerprint of the arranging code, to confirm which build is live."""
+    import hashlib
+    h = hashlib.sha1()
+    for f in sorted((ROOT / "roster_chorale").glob("*.py")) + [ROOT / "data" / "grades.json"]:
+        h.update(f.read_bytes().replace(b"
+", b"
+"))
+    return h.hexdigest()[:10]
+
+
 @app.get("/api/health")
 def health() -> dict:
-    return {"ok": True, "chorales": len(chmod.catalog())}
+    return {"ok": True, "chorales": len(chmod.catalog()), "version": _code_version()}
 
 
 @app.get("/api/chorales")
