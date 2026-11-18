@@ -31,11 +31,11 @@ The grade table is plain JSON you can edit. **These are starting values: conserv
 
 | | Ranges | Concert keys | Rhythm |
 |---|---|---|---|
-| ½ and 1 | narrow (e.g. trumpet Bb3–C5, tuba Bb1–Bb2, written) | Bb, Eb, F, Ab major; G, C, F minor | eighth-note pairs merged into a quarter that keeps the on-beat pitch; ties across barlines removed; fermatas kept |
+| ½ and 1 | narrow (e.g. trumpet Bb3–C5, tuba Bb1–C3, written) | Bb, Eb, F, Ab major; G, C, F minor | eighth-note pairs merged into a quarter that keeps the on-beat pitch; ties across barlines removed; fermatas kept |
 | 2 | wider | adds C, Db major and Bb minor | sixteenths simplified to eighths |
 | 3 | wider still | up to 4 flats or 2 sharps | as written |
 
-Ranges are written pitch, inclusive, in music21 spelling (`B-4` = B♭4). The grade-1 tuba range (one octave) is the most common reason a grade-1 arrangement ends up “least-bad”. Widen it if your tubas can play a C3.
+Ranges are written pitch, inclusive, in music21 spelling (`B-4` = B♭4). The spec started grade-1 tuba at Bb1–Bb2; it is now Bb1–C3. Tuba and bass clarinet are still the most common reason a grade-1 arrangement ends up “least-bad” (usually one or two notes), so widen those ranges if your players can manage it.
 
 ## Run it locally
 

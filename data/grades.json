@@ -16,7 +16,7 @@
         "Horn": ["G3", "C5"],
         "Trombone": ["B-2", "C4"],
         "Euphonium": ["B-2", "C4"],
-        "Tuba": ["B-1", "B-2"]
+        "Tuba": ["B-1", "C3"]
       },
       "keys": {"major": ["B-", "E-", "F", "A-"], "minor": ["G", "C", "F"]},
       "rhythm": {"grid": 1.0, "drop_bar_ties": true}
@@ -36,7 +36,7 @@
         "Horn": ["G3", "C5"],
         "Trombone": ["B-2", "C4"],
         "Euphonium": ["B-2", "C4"],
-        "Tuba": ["B-1", "B-2"]
+        "Tuba": ["B-1", "C3"]
       },
       "keys": {"major": ["B-", "E-", "F", "A-"], "minor": ["G", "C", "F"]},
       "rhythm": {"grid": 1.0, "drop_bar_ties": true}
