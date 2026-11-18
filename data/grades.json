@@ -1,0 +1,85 @@
+{
+  "_note": "Starting values: conservative and approximate. Ranges are WRITTEN pitch (what the player reads), inclusive, in music21 spelling (B- = B-flat). Check these against your state's grading guide and edit freely. Key tonics use music21 spelling too.",
+  "grades": {
+    "0.5": {
+      "label": "Grade 0.5",
+      "ranges": {
+        "Flute": ["D4", "C6"],
+        "Oboe": ["D4", "B5"],
+        "Clarinet": ["G3", "C5"],
+        "Bass Clarinet": ["G3", "B-4"],
+        "Bassoon": ["F2", "C4"],
+        "Alto Sax": ["D4", "C6"],
+        "Tenor Sax": ["D4", "C6"],
+        "Bari Sax": ["D4", "C6"],
+        "Trumpet": ["B-3", "C5"],
+        "Horn": ["G3", "C5"],
+        "Trombone": ["B-2", "C4"],
+        "Euphonium": ["B-2", "C4"],
+        "Tuba": ["B-1", "B-2"]
+      },
+      "keys": {"major": ["B-", "E-", "F", "A-"], "minor": ["G", "C", "F"]},
+      "rhythm": {"grid": 1.0, "drop_bar_ties": true}
+    },
+    "1": {
+      "label": "Grade 1",
+      "ranges": {
+        "Flute": ["D4", "C6"],
+        "Oboe": ["D4", "B5"],
+        "Clarinet": ["G3", "C5"],
+        "Bass Clarinet": ["G3", "B-4"],
+        "Bassoon": ["F2", "C4"],
+        "Alto Sax": ["D4", "C6"],
+        "Tenor Sax": ["D4", "C6"],
+        "Bari Sax": ["D4", "C6"],
+        "Trumpet": ["B-3", "C5"],
+        "Horn": ["G3", "C5"],
+        "Trombone": ["B-2", "C4"],
+        "Euphonium": ["B-2", "C4"],
+        "Tuba": ["B-1", "B-2"]
+      },
+      "keys": {"major": ["B-", "E-", "F", "A-"], "minor": ["G", "C", "F"]},
+      "rhythm": {"grid": 1.0, "drop_bar_ties": true}
+    },
+    "2": {
+      "label": "Grade 2",
+      "ranges": {
+        "Flute": ["C4", "F6"],
+        "Oboe": ["C4", "D6"],
+        "Clarinet": ["E3", "G5"],
+        "Bass Clarinet": ["E3", "F5"],
+        "Bassoon": ["B-1", "F4"],
+        "Alto Sax": ["C4", "D6"],
+        "Tenor Sax": ["C4", "D6"],
+        "Bari Sax": ["C4", "D6"],
+        "Trumpet": ["A3", "E5"],
+        "Horn": ["F3", "E5"],
+        "Trombone": ["F2", "D4"],
+        "Euphonium": ["F2", "D4"],
+        "Tuba": ["F1", "D3"]
+      },
+      "keys": {"major": ["B-", "E-", "F", "A-", "C", "D-"], "minor": ["G", "C", "F", "B-"]},
+      "rhythm": {"grid": 0.5, "drop_bar_ties": false}
+    },
+    "3": {
+      "label": "Grade 3",
+      "ranges": {
+        "Flute": ["C4", "G6"],
+        "Oboe": ["B-3", "E6"],
+        "Clarinet": ["E3", "C6"],
+        "Bass Clarinet": ["E3", "A5"],
+        "Bassoon": ["B-1", "A4"],
+        "Alto Sax": ["B-3", "E6"],
+        "Tenor Sax": ["B-3", "E6"],
+        "Bari Sax": ["B-3", "E6"],
+        "Trumpet": ["F#3", "G5"],
+        "Horn": ["C3", "F5"],
+        "Trombone": ["E2", "F4"],
+        "Euphonium": ["E2", "F4"],
+        "Tuba": ["E1", "F3"]
+      },
+      "keys": {"major": ["A-", "E-", "B-", "F", "C", "G", "D"], "minor": ["F", "C", "G", "D", "A", "E", "B"]},
+      "rhythm": null
+    }
+  }
+}
