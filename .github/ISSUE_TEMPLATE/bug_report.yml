@@ -1,0 +1,28 @@
+name: Bug report
+description: Something in Roster Chorale doesn't work the way it should
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      placeholder: Browser, or OS + Python version if running locally
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots, logs or anything else
