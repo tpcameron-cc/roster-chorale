@@ -107,6 +107,7 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .summary { font-weight: 600; font-size: 16px; }
 .warns { margin: 12px 0 0; padding: 0; list-style: none; }
 .warns li { background: var(--bad-soft); color: var(--bad); border-radius: 10px; padding: 8px 12px; margin-top: 6px; }
+.warns li.note { background: var(--accent-soft); color: var(--ink); }
 table.keys { border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 8px; }
 table.keys th, table.keys td { border-bottom: 1px solid var(--line); padding: 5px 8px; text-align: left; }
 table.keys td.n, table.keys th.n { text-align: right; font-variant-numeric: tabular-nums; }
@@ -470,12 +471,13 @@ function renderResult(r) {
   $("#key-orig").textContent = `Bach: ${r.chorale.original_key}`;
   $("#summary").textContent = r.summary;
   $("#explanation").textContent = r.explanation;
-  $("#warns").innerHTML = r.warnings.map((w) => `<li>${esc(w)}</li>`).join("");
+  $("#warns").innerHTML = (r.notes || []).map((n) => `<li class="note">${esc(n)}</li>`).join("")
+    + r.warnings.map((w) => `<li>${esc(w)}</li>`).join("");
   $("#keys").innerHTML = `<tr><th>Concert key</th><th class="n">Out of range as written</th><th class="n">Phrase shifts</th><th class="n">Phrase rests</th><th class="n">Still out of range</th><th>Biggest problem</th></tr>` +
     r.keys_considered.map((k, i) => `<tr class="${i === 0 ? "win" : ""}"><td>${esc(k.key)}${i === 0 ? " ✓" : ""}</td><td class="n">${k.out_before_phrase_shifts}</td><td class="n">${k.phrase_shifts}</td><td class="n">${k.rests}</td><td class="n">${k.out_of_range}</td><td>${esc(k.worst || "–")}</td></tr>`).join("");
   $("#voices").innerHTML = Object.entries(r.voices).map(([v, insts]) => {
     const rows = r.assignment.filter((a) => a.voice_name === v);
-    return `<div class="voice" style="--c:var(--${VKEY[v]})"><h3>${v}</h3><ul>${rows.map((a) => `<li><span>${esc(a.instrument)}</span><span class="muted">${a.players}</span></li>`).join("") || `<li class="muted">not covered</li>`}</ul></div>`;
+    return `<div class="voice" style="--c:var(--${VKEY[v]})"><h3>${v}</h3><ul>${rows.map((a) => `<li><span>${esc(a.part || a.instrument)}</span><span class="muted">${a.players}</span></li>`).join("") || `<li class="muted">not covered</li>`}</ul></div>`;
   }).join("");
   $("#fit").innerHTML = r.assignment.map((a) => {
     const items = [];
@@ -515,7 +517,7 @@ async function renderParts(r) {
   const c = r.chorale;
   const title = c.title.includes("BWV") ? c.title : `${c.title}`;
   $("#parts").innerHTML = r.parts.map((p, i) => {
-    const a = r.assignment.find((x) => x.instrument === p.instrument);
+    const a = r.assignment.find((x) => (x.part || x.instrument) === (p.part || p.instrument));
     return `<article class="page" id="part-${i}">
       <div class="page-head">
         <div class="t">${esc(title)}</div><div class="pn">${esc(p.part_name)}</div>

@@ -35,6 +35,7 @@ Roster Chorale starts from **the players you have** and **the grade you're aimin
 | 🎚️ **Targets a grade** | Grade ½, 1, 2 or 3 sets each instrument's range, the allowed concert keys, and how much the rhythm is simplified. |
 | 🔑 **Chooses the key** | Tries every allowed key, counts how many notes fall out of range for *your* roster, and explains the winner and why the runner-up lost. |
 | 🎻 **Voices the chorale** | Puts every instrument on soprano, alto, tenor or bass so every line is covered, the bass goes to low instruments, and no chord is turned upside down. |
+| ✂️ **Splits small sections** | Only a few instrument types? Players split into numbered parts (Flute 1, Flute 2…) so all four lines are still heard — a clarinet quartet, a flute choir, two trumpets and a horn. |
 | 🔁 **Fits octaves by phrase** | Moves whole parts, then whole phrases (fermata to fermata) — never single notes — and rests a part for a phrase only when someone else covers it. |
 | 🥁 **Writes percussion too** | Timpani on tonic and dominant at the cadences; bass drum and suspended cymbal framing every phrase. |
 | 🖨️ **Prints real parts** | Every part is transposed (Bb, Eb, F, octave instruments, alto clef…) and engraved in your browser. Print all parts as PDF, one per page, or download MusicXML for MuseScore. |
@@ -108,8 +109,10 @@ flowchart LR
 2. **Whole-part octave.** Each instrument's line moves up or down by octaves to sit in its range — checked in **written** pitch, after transposing.
 3. **Phrase-level octave.** If notes still fall outside, whole phrases (fermata to fermata) move by an octave. Never single notes.
 4. **Phrase rests.** If a phrase can't fit an instrument in any octave *and* another instrument on that line plays it cleanly, that part rests for the phrase (never more than half its phrases).
-5. **Voicing.** Every voice is covered; the bass goes to low instruments and someone plays it at pitch or lower; no upper voice is pushed below the bass (that would invert the chords); instruments get lines that suit them; no voice is left thin; mallets only double.
-6. **Key score.** Fewest notes still out of range wins, then fewer octave fixes, more natural voicing, keys familiar to each section, and finally the smallest move from Bach's key. If nothing fits, you get the **least-bad** key in red, with every problem note listed by measure.
+5. **Splitting.** If there are fewer instrument types than lines, sections with players to spare split into numbered parts (Flute 1, Flute 2…) until every line is covered — as many lines as there are players, up to four. Part 1 takes the highest line and the larger group. Big ensembles are never split.
+6. **Voicing.** Every voice is covered; the bass goes to low instruments and someone plays it at pitch or lower; no upper voice is pushed below the bass (that would invert the chords); instruments get lines that suit them; no voice is left thin; mallets only double.
+7. **Lines in order.** Nothing sounds above the melody or below the bass: if a part has to move up an octave (say, a clarinet playing the bass line), the parts above it follow when their range allows. If it can't be avoided, the page says so.
+8. **Key score.** Fewest notes still out of range wins, then fewer octave fixes, more natural voicing, keys familiar to each section, and finally the smallest move from Bach's key. If nothing fits, you get the **least-bad** key in red, with every problem note listed by measure.
 
 **Mixed groups.** Winds use the band key list for the grade (flat keys); strings use the string list (sharp keys). A full orchestra tries both, costs each player a little when a key is off their section's list, and tells you when one section is reading an unfamiliar key.
 
@@ -213,7 +216,7 @@ docs/                       screenshots and the original build spec
 
 - Chorales come from the [music21](https://www.music21.org/) corpus: the 371 Riemenschneider chorales plus other plain chorale files (such as BWV 66.6), keeping the **355** with exactly four parts named Soprano/Alto/Tenor/Bass. Chorales without a title in music21 appear as “Chorale from BWV …”.
 - Repeat signs in the source aren't reproduced; repeated sections print once.
-- One part per instrument (no Clarinet 1/2 or Violin 1/2). Euphonium is bass clef.
+- Sections split into numbered parts only when needed to cover the four lines; a full band still gets one part per instrument. Euphonium is bass clef.
 - No dynamics, articulations or audio playback.
 
 ## 🙏 Credits

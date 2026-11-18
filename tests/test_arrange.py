@@ -127,16 +127,52 @@ def test_bass_line_goes_to_low_instruments_when_present():
     assert "Tuba" in bass and all(INSTRUMENTS[i].low for i in bass)
 
 
-def test_one_instrument_type_plays_melody_with_warning():
-    res = arrange("bwv66.6", {"Clarinet": 7}, "1", with_parts=False)
-    assert res["voices"]["Soprano"] == ["Clarinet"]
-    assert any("Only one instrument type" in w for w in res["warnings"])
+FOUR_LINES = ("Soprano", "Alto", "Tenor", "Bass")
 
 
-def test_two_instrument_types_cover_soprano_and_bass():
-    res = arrange("bwv66.6", {"Flute": 4, "Trombone": 2}, "1", with_parts=False)
-    assert res["voices"]["Soprano"] == ["Flute"] and res["voices"]["Bass"] == ["Trombone"]
+@pytest.mark.parametrize("grade", ["1", "3"])
+def test_one_section_splits_to_cover_all_four_lines(grade):
+    res = arrange("bwv66.6", {"Clarinet": 7}, grade)
+    assert [res["voices"][v] for v in FOUR_LINES] == [["Clarinet 1"], ["Clarinet 2"], ["Clarinet 3"], ["Clarinet 4"]]
+    assert sum(a["players"] for a in res["assignment"]) == 7
+    assert [p["part_name"] for p in res["parts"]] == [f"Clarinet {n} in Bb" for n in range(1, 5)]
+    assert len({p["filename"] for p in res["parts"]}) == 4
+    assert any("split into 4 parts" in n for n in res["notes"])
+    assert not any("left out" in w for w in res["warnings"])
+
+
+@pytest.mark.parametrize("roster,expect_bass", [
+    ({"Flute": 4, "Trombone": 2}, "Trombone"),
+    ({"Flute": 3, "Tuba": 1}, "Tuba"),
+    ({"Violin": 5, "Cello": 2}, "Cello"),
+    ({"Clarinet": 4, "Bari Sax": 2}, "Bari Sax"),
+    ({"Trumpet": 3, "Horn": 1}, "Horn"),
+])
+@pytest.mark.parametrize("grade", ["1", "3"])
+def test_small_groups_cover_every_line_and_keep_the_bass_low(roster, expect_bass, grade):
+    res = arrange("bwv66.6", roster, grade, with_parts=False)
+    assert all(res["voices"][v] for v in FOUR_LINES), res["voices"]
+    assert all(p.startswith(expect_bass) for p in res["voices"]["Bass"]), res["voices"]
+    by_inst: dict[str, int] = {}
+    for a in res["assignment"]:
+        by_inst[a["instrument"]] = by_inst.get(a["instrument"], 0) + a["players"]
+    assert by_inst == roster
+
+
+@pytest.mark.parametrize("roster,lines", [({"Flute": 1}, 1), ({"Flute": 2}, 2), ({"Flute": 2, "Tuba": 1}, 3)])
+def test_fewer_than_four_players_cover_as_many_lines_as_possible(roster, lines):
+    res = arrange("bwv66.6", roster, "1", with_parts=False)
+    covered = [v for v in FOUR_LINES if res["voices"][v]]
+    assert len(covered) == lines and "Soprano" in covered
+    if lines >= 2:
+        assert "Bass" in covered
     assert any("left out" in w for w in res["warnings"])
+
+
+def test_big_ensembles_are_not_split():
+    res = arrange("bwv66.6", LOPSIDED, "1", with_parts=False)
+    assert all(a["part"] == a["instrument"] for a in res["assignment"])
+    assert res["notes"] == []
 
 
 def test_upper_voices_never_sound_below_the_bass():
@@ -265,7 +301,8 @@ ORCHESTRA = {"Flute": 2, "Oboe": 2, "Clarinet": 2, "Bassoon": 2, "Horn": 4, "Tru
              "Violin": 16, "Viola": 6, "Cello": 5, "Double Bass": 3}
 
 
-@pytest.mark.parametrize("roster", [LOPSIDED, ORCHESTRA], ids=["band", "orchestra"])
+@pytest.mark.parametrize("roster", [LOPSIDED, ORCHESTRA, {"Clarinet": 7}, {"Flute": 4, "Trombone": 2}],
+                         ids=["band", "orchestra", "clarinets-divisi", "flutes-trombones-divisi"])
 @pytest.mark.parametrize("grade", ["1", "3"])
 @pytest.mark.parametrize("cid", SAMPLE_CHORALES[:6])
 def test_written_parts_transpose_back_to_the_assigned_voice(cid, grade, roster):
@@ -274,7 +311,7 @@ def test_written_parts_transpose_back_to_the_assigned_voice(cid, grade, roster):
     best = search_keys(ch, roster, cfg)[0]
     key_iv = key_interval(ch.key.tonic.name, best.tonic)
     for name, v in best.assign.items():
-        inst = INSTRUMENTS[name]
+        inst = INSTRUMENTS[best.inst(name)]
         xml = to_musicxml(build_part(ch, v, inst, best, best.fits[name], cfg["label"]))
         part = converter.parseData(xml, format="musicxml").parts[0]
         sounding = inst.written_interval.reverse() if inst.written_semitones else None   # written -> sounding
@@ -296,3 +333,20 @@ def test_no_printed_note_out_of_range_for_sample_band(grade):
         part = converter.parseData(p["musicxml"], format="musicxml").parts[0]
         for n in part.recurse().notes:
             assert lo <= n.pitch.ps <= hi, (grade, p["instrument"], n.nameWithOctave)
+
+
+@pytest.mark.parametrize("roster", [{"Clarinet": 7}, {"Flute": 4, "Trombone": 2}, {"Violin": 5, "Cello": 2},
+                                    {"Trumpet": 4}, LOPSIDED])
+@pytest.mark.parametrize("grade", ["1", "3"])
+@pytest.mark.parametrize("cid", SAMPLE_CHORALES[:6])
+def test_lines_stay_in_order(cid, grade, roster):
+    """Nothing sounds above the melody line or below the bass line."""
+    from roster_chorale.arrange import inversions, over_melody
+    from roster_chorale.instruments import VOICES
+    cfg = grade_cfg(grade)
+    ch, _ = chmod.simplify(chmod.load(cid), cfg["rhythm"])
+    best = search_keys(ch, roster, cfg)[0]
+    means = {v: sum(n.midi for n in voice_notes(ch, v)) / len(voice_notes(ch, v)) for v in VOICES}
+    fp = {(p, v): best.fits[p] for p, v in best.assign.items()}
+    assert not over_melody(best.assign, fp, means)
+    assert not inversions(best.assign, fp, means)

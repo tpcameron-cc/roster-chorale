@@ -35,6 +35,8 @@ COST_LOW_ON_MELODY = 30  # a bass instrument (tuba, bari, cello…) given the so
 COST_BELOW_BASS = 500   # an upper voice octave-displaced so it sounds below the bass line (wrong harmony)
 BELOW_BASS_MARGIN = 5   # semitones an upper voice's average must stay above the bass line's average
 COST_NO_REAL_BASS = 80  # nobody plays the bass line at pitch or lower (so the harmony is inverted)
+COST_LOW_OFF_BASS = 300 # the roster has a low instrument but none of them is on the bass line
+COST_OVER_MELODY = 60   # an alto/tenor part sounding above the highest melody part (hides the tune)
 COST_TWO_OCT = 2        # whole part moved two octaves
 COST_THIN = 4           # per player a voice is short of BALANCE_SHARE of the band
 BALANCE_SHARE = 0.15
@@ -135,7 +137,7 @@ def voice_notes(ch: Chorale, v: str) -> list[NoteRef]:
     return refs
 
 
-def fit(notes: list[NoteRef], base: int, lo: int, hi: int) -> Fit:
+def fit(notes: list[NoteRef], base: int, lo: int, hi: int, octave: int | None = None) -> Fit:
     """Best octave plan for one line. `base` = key transposition + instrument written offset (semitones).
 
     1. shift the whole part by the octave that leaves the fewest notes out of range;
@@ -148,7 +150,7 @@ def fit(notes: list[NoteRef], base: int, lo: int, hi: int) -> Fit:
 
     centre = (lo + hi) / 2
     best = None
-    for o in OCTAVE_TRIES:
+    for o in (OCTAVE_TRIES if octave is None else (octave,)):
         cnt = sum(1 for n in notes if out(n, o))
         mean = sum(n.midi for n in notes) / max(len(notes), 1) + base + 12 * o
         score = (cnt, abs(o), abs(mean - centre))
@@ -187,9 +189,10 @@ def pref_cost(inst: Inst, v: str) -> int:
     return c + (COST_LOW_ON_MELODY if inst.low and v == "S" else 0)
 
 
-def balance_cost(assign: dict[str, str], counts: dict[str, int]) -> float:
+def balance_cost(assign: dict[str, str], counts: dict[str, int], inst_of: dict[str, str] | None = None) -> float:
     """Penalty for thin voices. Mallets only double, so they don't count toward balance."""
-    counts = {i: n for i, n in counts.items() if INSTRUMENTS[i].family != "mallets"} or counts
+    inst_of = inst_of or {i: i for i in counts}
+    counts = {i: n for i, n in counts.items() if INSTRUMENTS[inst_of[i]].family != "mallets"} or counts
     total = sum(counts.values())
     per = {v: 0 for v in VOICES}
     for i, v in assign.items():
@@ -238,14 +241,39 @@ def phrase_plan(assign: dict[str, str], fits: dict[tuple[str, str], Fit],
     return cost, tacet, residual
 
 
+def inversions(a: dict[str, str], fits: dict[tuple[str, str], Fit], means: dict[str, float]) -> set[str]:
+    """Parts on an upper line that sound below the lowest-sounding bass part (which turns the chords upside down)."""
+    bass = [i for i, v in a.items() if v == "B"]
+    if not bass or not means:
+        return set()
+    low = min(means["B"] + 12 * fits[i, "B"].octave for i in bass)
+    return {i for i, v in a.items() if v != "B" and means[v] + 12 * fits[i, v].octave < low + BELOW_BASS_MARGIN}
+
+
+def over_melody(a: dict[str, str], fits: dict[tuple[str, str], Fit], means: dict[str, float]) -> set[str]:
+    """Alto/tenor parts that sound above the highest-sounding soprano part."""
+    sop = [i for i, v in a.items() if v == "S"]
+    if not sop or not means:
+        return set()
+    top = max(means["S"] + 12 * fits[i, "S"].octave for i in sop)
+    return {i for i, v in a.items() if v in ("A", "T") and means[v] + 12 * fits[i, v].octave > top}
+
+
 def assign_voices(cost: dict[tuple[str, str], float], fits: dict[tuple[str, str], Fit],
                   counts: dict[str, int], n_phrases: int,
-                  real_bass: dict[str, bool] | None = None) -> tuple[dict[str, str], float]:
-    """Exact search: choose distinct instruments to cover the required voices, everyone
-    else takes their cheapest voice; then a hill-climb that also weighs balance."""
+                  real_bass: dict[str, bool] | None = None,
+                  inst_of: dict[str, str] | None = None,
+                  means: dict[str, float] | None = None,
+                  below: set[tuple[str, str]] | None = None) -> tuple[dict[str, str], float]:
+    """Exact search: choose distinct parts to cover the required voices, everyone else
+    takes their cheapest voice; then a hill-climb that also weighs balance.
+
+    Keys are parts: normally one per instrument, or "Flute 1", "Flute 2" and so on when
+    an instrument is split (inst_of maps each part to its instrument)."""
     insts = list(counts)
+    inst_of = inst_of or {i: i for i in insts}
     # Mallets double lines; they never carry a voice alone unless the group is only mallets.
-    core = [i for i in insts if INSTRUMENTS[i].family != "mallets"] or insts
+    core = [i for i in insts if INSTRUMENTS[inst_of[i]].family != "mallets"] or insts
     n = len(core)
     req = required_voices(n)
     real_bass = real_bass or {i: True for i in insts}
@@ -253,14 +281,27 @@ def assign_voices(cost: dict[tuple[str, str], float], fits: dict[tuple[str, str]
     seed = {(i, v): cost[i, v] + COST_TACET * len(fits[i, v].bad) for i in insts for v in VOICES}
     cheapest = {i: min(VOICES, key=lambda v: (seed[i, v], VOICES.index(v))) for i in insts}
 
+    has_low = any(INSTRUMENTS[inst_of[i]].low for i in insts)
+
     def bass_penalty(a: dict[str, str]) -> float:
         if "B" not in a.values():
             return 0.0
-        return 0.0 if any(real_bass[i] for i, v in a.items() if v == "B") else COST_NO_REAL_BASS
+        pen = 0.0 if any(real_bass[i] for i, v in a.items() if v == "B") else COST_NO_REAL_BASS
+        if has_low and not any(INSTRUMENTS[inst_of[i]].low for i, v in a.items() if v == "B"):
+            pen += COST_LOW_OFF_BASS
+        return pen
+
+    below = below or set()
+
+    def inversion_penalty(a: dict[str, str]) -> float:
+        # inversions the per-part check (against Bach's bass pitch) didn't already price in
+        extra = [i for i in inversions(a, fits, means or {}) if (i, a[i]) not in below]
+        return COST_BELOW_BASS * len(extra) + COST_OVER_MELODY * len(over_melody(a, fits, means or {}))
 
     def total_of(a: dict[str, str], balance: bool = True) -> float:
-        t = sum(cost[i, v] for i, v in a.items()) + bass_penalty(a) + phrase_plan(a, fits, n_phrases)[0]
-        return t + (balance_cost(a, counts) if balance else 0.0)
+        t = (sum(cost[i, v] for i, v in a.items()) + bass_penalty(a) + inversion_penalty(a)
+             + phrase_plan(a, fits, n_phrases)[0])
+        return t + (balance_cost(a, counts, inst_of) if balance else 0.0)
 
     # For each voice, the instruments that lose least by being moved onto it (all of them for
     # small rosters). Trying these as each voice's guaranteed player keeps big orchestras fast.
@@ -324,6 +365,11 @@ class KeyResult:
     total: float
     off_list: dict[str, int] = field(default_factory=dict)  # family -> players for whom the key isn't on their grade list
     inverted: int = 0        # parts pushed below the bass line (wrong harmony); ranks like 5 notes out of range
+    part_inst: dict[str, str] = field(default_factory=dict)   # part ("Flute 2") -> instrument ("Flute")
+    players: dict[str, int] = field(default_factory=dict)     # part -> players
+
+    def inst(self, part: str) -> str:
+        return self.part_inst.get(part, part)
 
     @property
     def rank(self) -> tuple[float, float]:
@@ -377,6 +423,119 @@ def candidate_keys(counts: dict[str, int], cfg: dict, mode: str) -> list[tuple[s
     return out
 
 
+def split_options(counts: dict[str, int]) -> list[dict[str, tuple[str, int]]]:
+    """Ways to turn the roster into parts: {part: (instrument, players)}.
+
+    Normally one part per instrument. When there are fewer instrument types than
+    chorale lines, instruments with players to spare are split into numbered parts
+    ("Flute 1", "Flute 2") so that every line is covered: as many lines as there are
+    players, up to four. Mallets only double, so they are never split."""
+    identity = {i: (i, n) for i, n in counts.items()}
+    core = {i: n for i, n in counts.items() if INSTRUMENTS[i].family != "mallets"}
+    if not core:
+        return [identity]
+    target = min(len(VOICES), sum(core.values()))
+    if len(core) >= target:
+        return [identity]
+    names = list(core)
+    options = []
+    for ks in itertools.product(*(range(1, min(core[i], len(VOICES)) + 1) for i in names)):
+        if sum(ks) != target:
+            continue
+        parts: dict[str, tuple[str, int]] = {}
+        for i, k in zip(names, ks):
+            if k == 1:
+                parts[i] = (i, core[i])
+                continue
+            base, extra = divmod(core[i], k)
+            for j in range(k):
+                parts[f"{i} {j + 1}"] = (i, base + (1 if j < extra else 0))
+        for i, n in counts.items():
+            if i not in core:
+                parts[i] = (i, n)
+        options.append(parts)
+    return options or [identity]
+
+
+def _number_parts(assign: dict[str, str], inst_of: dict[str, str], players: dict[str, int]):
+    """Renumber split parts top-down (Flute 1 = highest line); higher lines get the larger groups."""
+    groups: dict[str, list[str]] = {}
+    for pt, i in inst_of.items():
+        if pt != i:
+            groups.setdefault(i, []).append(pt)
+    if not groups:
+        return assign, inst_of, players
+    new_assign, new_inst, new_players = {}, {}, {}
+    for pt, v in assign.items():
+        if inst_of[pt] == pt:
+            new_assign[pt], new_inst[pt], new_players[pt] = v, pt, players[pt]
+    for i, pts in groups.items():
+        pts = sorted(pts, key=lambda x: VOICES.index(assign[x]))
+        sizes = sorted((players[x] for x in pts), reverse=True)
+        for j, (pt, n) in enumerate(zip(pts, sizes), start=1):
+            key_ = f"{i} {j}"
+            new_assign[key_], new_inst[key_], new_players[key_] = assign[pt], i, n
+    order = {i: k for k, i in enumerate(ORDER)}
+    keys = sorted(new_assign, key=lambda x: (order[new_inst[x]], x))
+    return ({k: new_assign[k] for k in keys}, {k: new_inst[k] for k in keys}, {k: new_players[k] for k in keys})
+
+
+def _keep_melody_on_top(assign, fits_p, inst_of, notes, means, semis, rng) -> None:
+    """Keep the lines in order after voicing: nothing above the melody, nothing below the bass.
+
+    When the bass line had to go up an octave (say, clarinets only), inner parts that now
+    sit under it move up too; when an inner part sits above the melody, the melody moves up
+    (or the inner part down). A move is only made if no new note leaves the range."""
+    def bad_count(f: Fit) -> int:
+        return sum(len(ns) for ns in f.bad.values())
+
+    def refit(pt: str, v: str, octave: int) -> Fit:
+        inst = INSTRUMENTS[inst_of[pt]]
+        lo, hi = rng[inst.name]
+        return fit(notes[v], semis + inst.written_semitones, lo, hi, octave)
+
+    def try_move(moves: dict[str, int]) -> bool:
+        """moves: part -> octave delta. Apply all-or-nothing if it helps and keeps notes in range."""
+        trial = dict(fits_p)
+        for pt, d in moves.items():
+            v = assign[pt]
+            new = refit(pt, v, fits_p[pt, v].octave + d)
+            if abs(new.octave) > 2 or bad_count(new) > bad_count(fits_p[pt, v]):
+                return False
+            trial[pt, v] = new
+        before = len(inversions(assign, fits_p, means)) + len(over_melody(assign, fits_p, means))
+        after = len(inversions(assign, trial, means)) + len(over_melody(assign, trial, means))
+        if after < before:
+            fits_p.update(trial)
+            return True
+        return False
+
+    sop = [pt for pt, v in assign.items() if v == "S"]
+    for _ in range(6):
+        inv = inversions(assign, fits_p, means)
+        over = over_melody(assign, fits_p, means)
+        if not inv and not over:
+            return
+        if inv and (try_move({pt: 1 for pt in inv})
+                    or try_move({**{pt: 1 for pt in inv}, **{pt: 1 for pt in sop if pt not in inv}})):
+            continue
+        if over and (try_move({pt: 1 for pt in sop}) or try_move({pt: -1 for pt in over})):
+            continue
+        return
+
+
+def part_label(inst: Inst, part: str) -> str:
+    """Printed name: 'Flute 2', 'Clarinet 2 in Bb', 'Horn 3 in F'."""
+    if part == inst.name:
+        return inst.part_name
+    num = part.rsplit(" ", 1)[1]
+    full = inst.part_name
+    if " in " in full:
+        a, b = full.split(" in ", 1)
+        return f"{a} {num} in {b}"
+    return f"{full} {num}"
+
+
 def search_keys(ch: Chorale, counts: dict[str, int], cfg: dict) -> list[KeyResult]:
     mode = ch.key.mode if ch.key.mode in ("major", "minor") else "major"
     rng = ranges_midi(cfg)
@@ -400,16 +559,29 @@ def search_keys(ch: Chorale, counts: dict[str, int], cfg: dict) -> list[KeyResul
                 if v != "B" and mean[v] + 12 * f.octave < mean["B"] + BELOW_BASS_MARGIN:
                     cost[name, v] += COST_BELOW_BASS
                     below.add((name, v))
-        real_bass = {name: fits[name, "B"].octave <= 0 for name in counts}
-        assign, total = assign_voices(cost, fits, counts, n_phrases, real_bass)
-        _, tacet, _ = phrase_plan(assign, fits, n_phrases)
+        best_opt = None
+        for parts in split_options(counts):
+            inst_of = {pt: i for pt, (i, _) in parts.items()}
+            pc = {pt: n for pt, (_, n) in parts.items()}
+            cost_p = {(pt, v): cost[i, v] for pt, i in inst_of.items() for v in VOICES}
+            fits_p = {(pt, v): fits[i, v] for pt, i in inst_of.items() for v in VOICES}
+            real_bass = {pt: fits[i, "B"].octave <= 0 for pt, i in inst_of.items()}
+            below_p = {(pt, v) for pt, i in inst_of.items() for v in VOICES if (i, v) in below}
+            assign, total = assign_voices(cost_p, fits_p, pc, n_phrases, real_bass, inst_of, mean, below_p)
+            if best_opt is None or total < best_opt[1]:
+                best_opt = (assign, total, inst_of, pc)
+        assign, total, inst_of, pc = best_opt
+        assign, inst_of, pc = _number_parts(assign, inst_of, pc)
+        fits_p = {(pt, v): fits[inst_of[pt], v] for pt in assign for v in VOICES}
+        _keep_melody_on_top(assign, fits_p, inst_of, notes, mean, semis, rng)
+        _, tacet, _ = phrase_plan(assign, fits_p, n_phrases)
         chosen = {}
-        for i, v in assign.items():
-            f = fits[i, v]
-            chosen[i] = Fit(f.octave, f.phrase_shifts, f.pre_out, f.pre_above, f.pre_below, f.bad, tacet[i])
+        for pt, v in assign.items():
+            f = fits_p[pt, v]
+            chosen[pt] = Fit(f.octave, f.phrase_shifts, f.pre_out, f.pre_above, f.pre_below, f.bad, tacet[pt])
         total += COST_KEY_MOVE * abs(semis) + COST_KEY_FAMILY * sum(off.values())
-        results.append(KeyResult(spelled, mode, semis, assign, chosen, total, off,
-                                 sum(1 for iv in assign.items() if iv in below)))
+        inverted = {pt for pt, v in assign.items() if (inst_of[pt], v) in below} | inversions(assign, fits_p, mean)
+        results.append(KeyResult(spelled, mode, semis, assign, chosen, total, off, len(inverted), inst_of, pc))
     results.sort(key=lambda r: r.rank)
     return results
 
@@ -422,7 +594,7 @@ def _worst(kr: KeyResult, cfg: dict) -> str:
     if kr.pre_out == 0:
         return ""
     name, f = max(kr.fits.items(), key=lambda kv: kv[1].pre_out)
-    lo, hi = cfg["ranges"][name]
+    lo, hi = cfg["ranges"][kr.inst(name)]
     if f.pre_above >= f.pre_below:
         return f"{f.pre_above} {name} note{'s' if f.pre_above != 1 else ''} above {pitch_label(hi)}"
     return f"{f.pre_below} {name} note{'s' if f.pre_below != 1 else ''} below {pitch_label(lo)}"
@@ -436,7 +608,7 @@ def _residual_text(kr: KeyResult, cfg: dict) -> str:
             probs = [x for x in f.problems if x[2] == d]
             if not probs:
                 continue
-            limit = cfg["ranges"][name][1] if d == "above" else cfg["ranges"][name][0]
+            limit = cfg["ranges"][kr.inst(name)][1] if d == "above" else cfg["ranges"][kr.inst(name)][0]
             written = ", ".join(pitch_label(pitch.Pitch(w)) for w in sorted({w for _, w, _ in probs}))
             parts.append(f"{_plural(len(probs), name + ' note')} (written {written}) "
                          f"{'stay' if len(probs) != 1 else 'stays'} {d} the {pitch_label(limit)} limit in every octave")
@@ -489,7 +661,9 @@ def explain(results: list[KeyResult], ch: Chorale, cfg: dict) -> tuple[str, str]
 # ---------------------------------------------------------------------------
 # Writing parts
 # ---------------------------------------------------------------------------
-def build_part(ch: Chorale, v: str, inst: Inst, kr: KeyResult, f: Fit, grade_label: str) -> stream.Score:
+def build_part(ch: Chorale, v: str, inst: Inst, kr: KeyResult, f: Fit, grade_label: str,
+               label: str | None = None) -> stream.Score:
+    label = label or inst.part_name
     key_iv = key_interval(ch.key.tonic.name, kr.tonic)
     w_iv = inst.written_interval
     concert_key = key.Key(kr.tonic, kr.mode)
@@ -498,8 +672,9 @@ def build_part(ch: Chorale, v: str, inst: Inst, kr: KeyResult, f: Fit, grade_lab
 
     part = stream.Part()
     m21inst = inst.m21()
+    m21inst.partName = label
     part.insert(0, m21inst)
-    part.partName = inst.part_name
+    part.partName = label
     part.partAbbreviation = inst.name
     bars = ch.voices[v]
     for idx, b in enumerate(bars):
@@ -545,7 +720,7 @@ def build_part(ch: Chorale, v: str, inst: Inst, kr: KeyResult, f: Fit, grade_lab
     sc.metadata = metadata.Metadata()
     sc.metadata.title = chmod.display_title(ch.title, ch.bwv)
     sc.metadata.composer = "J. S. Bach"
-    sc.metadata.movementName = f"{inst.part_name} · {grade_label} · Concert {kr.name}"
+    sc.metadata.movementName = f"{label} · {grade_label} · Concert {kr.name}"
     sc.insert(0, part)
     sc.atSoundingPitch = False
     return sc
@@ -613,14 +788,33 @@ def arrange(chorale_id: str, counts: dict[str, int], grade: str | float, with_pa
     short, long = explain(results, ch, cfg)
 
     warnings: list[str] = []
+    notes: list[str] = []
     voices_used = set(best.assign.values())
     missing = [VOICE_NAMES[v] for v in VOICES if v not in voices_used]
-    if len(counts) == 1:
-        warnings.append(f"Only one instrument type ({next(iter(counts))}), so everyone plays the melody (soprano).")
-    elif missing:
-        warnings.append(f"Only {len(counts)} instrument types, so the {' and '.join(missing)} line"
-                        f"{'s are' if len(missing) > 1 else ' is'} left out.")
-    if "B" in voices_used and not any(INSTRUMENTS[i].low for i, v in best.assign.items() if v == "B"):
+    line_players = sum(n for i, n in counts.items() if INSTRUMENTS[i].family != "mallets") or sum(counts.values())
+    if missing:
+        who = "player" if line_players == 1 else "players"
+        warnings.append(f"Only {line_players} {who} for the chorale's four lines, so the {' and '.join(missing)} line"
+                        f"{'s are' if len(missing) > 1 else ' is'} left out. Add a player (or classify an unrecognised "
+                        f"one) to fill {'them' if len(missing) > 1 else 'it'} in.")
+    split = {}
+    for pt, i in best.part_inst.items():
+        if pt != i:
+            split.setdefault(i, []).append(pt)
+    for i, pts in split.items():
+        desc = ", ".join(f"{pt} on {VOICE_NAMES[best.assign[pt]].lower()} ({_plural(best.players[pt], 'player')})"
+                         for pt in pts)
+        notes.append(f"Not enough instrument types to cover all four lines, so the {i.lower()} section is split "
+                     f"into {len(pts)} parts: {desc}.")
+    if best.inverted:
+        means = {v: sum(n.midi for n in voice_notes(ch, v)) / max(len(voice_notes(ch, v)), 1) for v in VOICES}
+        fp = {(pt, v): best.fits[pt] for pt, v in best.assign.items()}
+        under = sorted(inversions(best.assign, fp, means))
+        if under:
+            warnings.append(f"The bass line has to be played an octave up to stay in range, so {', '.join(under)} "
+                            f"sometimes sound{'s' if len(under) == 1 else ''} below it and some chords come out "
+                            f"upside down. A low instrument on the roster would fix this.")
+    if "B" in voices_used and not any(INSTRUMENTS[best.inst(i)].low for i, v in best.assign.items() if v == "B"):
         bass_players = [i for i, v in best.assign.items() if v == "B"]
         warnings.append(f"No low instrument (cello, double bass, trombone, euphonium, tuba, bari sax, bass clarinet "
                         f"or bassoon) on the roster: "
@@ -638,8 +832,9 @@ def arrange(chorale_id: str, counts: dict[str, int], grade: str | float, with_pa
         notes_txt = []
         for name, f in best.fits.items():
             for n, w, d in f.problems:
+                rg = cfg["ranges"][best.inst(name)]
                 notes_txt.append(f"{name} m. {n.measure}: written {pitch_label(pitch.Pitch(w))} ({d} "
-                                 f"{pitch_label(cfg['ranges'][name][1] if d == 'above' else cfg['ranges'][name][0])})")
+                                 f"{pitch_label(rg[1] if d == 'above' else rg[0])})")
         shown = "; ".join(notes_txt[:4]) + ("; …" if len(notes_txt) > 4 else "")
         warnings.append(f"No allowed key keeps every note inside the {cfg['label']} ranges. Concert {best.name} is the "
                         f"least-bad option: {_plural(best.residual, 'note')} still out of range ({shown}). "
@@ -654,7 +849,9 @@ def arrange(chorale_id: str, counts: dict[str, int], grade: str | float, with_pa
     assignment = []
     parts = []
     for name, v in best.assign.items():
-        inst = INSTRUMENTS[name]
+        inst = INSTRUMENTS[best.inst(name)]
+        rg = cfg["ranges"][inst.name]
+        label = part_label(inst, name)
         f = best.fits[name]
         spans = phrase_spans[v]
         shifts = [{
@@ -668,7 +865,7 @@ def arrange(chorale_id: str, counts: dict[str, int], grade: str | float, with_pa
             "measure": n.measure, "beat": n.beat,
             "written": pitch_label(pitch.Pitch(w)), "direction": d,
             "text": f"m. {n.measure} beat {n.beat}: written {pitch_label(pitch.Pitch(w))} is {d} the "
-                    f"{pitch_label(cfg['ranges'][name][1] if d == 'above' else cfg['ranges'][name][0])} limit",
+                    f"{pitch_label(rg[1] if d == 'above' else rg[0])} limit",
         } for n, w, d in f.problems]
         others = [i for i, vv in best.assign.items() if vv == v and i != name]
         rests = [{
@@ -678,12 +875,13 @@ def arrange(chorale_id: str, counts: dict[str, int], grade: str | float, with_pa
                     f"{_cover(others, best, ph)} the line there",
         } for ph in sorted(f.tacet)]
         entry = {
-            "instrument": name,
-            "part_name": inst.part_name,
-            "players": counts[name],
+            "part": name,
+            "instrument": inst.name,
+            "part_name": label,
+            "players": best.players.get(name, counts.get(name, 0)),
             "voice": v,
             "voice_name": VOICE_NAMES[v],
-            "range": f"{pitch_label(cfg['ranges'][name][0])}–{pitch_label(cfg['ranges'][name][1])} (written)",
+            "range": f"{pitch_label(rg[0])}–{pitch_label(rg[1])} (written)",
             "part_octave": f.octave,
             "part_octave_text": ("as written" if f.octave == 0 else
                                  f"whole part {'up' if f.octave > 0 else 'down'} "
@@ -696,10 +894,11 @@ def arrange(chorale_id: str, counts: dict[str, int], grade: str | float, with_pa
         }
         assignment.append(entry)
         if with_parts:
-            sc = build_part(ch, v, inst, best, f, cfg["label"])
+            sc = build_part(ch, v, inst, best, f, cfg["label"], label)
             parts.append({
-                "instrument": name,
-                "part_name": inst.part_name,
+                "part": name,
+                "instrument": inst.name,
+                "part_name": label,
                 "voice": v,
                 "filename": safe_filename(f"{meta['id']}-{name}") + ".musicxml",
                 "musicxml": to_musicxml(sc),
@@ -718,14 +917,14 @@ def arrange(chorale_id: str, counts: dict[str, int], grade: str | float, with_pa
                 rows, text = perc.percussion_hits(ch, str(grade))
                 template, ks_key, rng_text = "S", None, "unpitched"
             assignment.append({
-                "instrument": name, "part_name": inst.part_name, "players": n, "voice": "P",
+                "part": name, "instrument": name, "part_name": inst.part_name, "players": n, "voice": "P",
                 "voice_name": "Percussion", "range": rng_text, "part_octave": 0, "part_octave_text": text,
                 "phrase_shifts": [], "rests": [], "out_before_phrase_shifts": 0, "out_of_range": 0, "problems": [],
             })
             if with_parts:
                 sc = perc.write_part(ch, template, rows, inst, best.name, cfg["label"], ks_key)
                 parts.append({
-                    "instrument": name, "part_name": inst.part_name, "voice": "P",
+                    "part": name, "instrument": name, "part_name": inst.part_name, "voice": "P",
                     "filename": safe_filename(f"{meta['id']}-{name}") + ".musicxml",
                     "musicxml": to_musicxml(sc),
                 })
@@ -734,7 +933,7 @@ def arrange(chorale_id: str, counts: dict[str, int], grade: str | float, with_pa
         return {"key": r.name, "out_before_phrase_shifts": r.pre_out, "phrase_shifts": r.n_shifts,
                 "out_of_range": r.residual, "rests": r.n_tacet, "score": round(r.total, 1), "worst": _worst(r, cfg)}
 
-    by_voice = {VOICE_NAMES[v]: [a["instrument"] for a in assignment if a["voice"] == v] for v in VOICES}
+    by_voice = {VOICE_NAMES[v]: [a["part"] for a in assignment if a["voice"] == v] for v in VOICES}
     if extras:
         by_voice["Percussion"] = list(extras)
     return {
@@ -751,6 +950,7 @@ def arrange(chorale_id: str, counts: dict[str, int], grade: str | float, with_pa
         "voices": by_voice,
         "rhythm": rhythm,
         "warnings": warnings,
+        "notes": notes,
         "parts": parts,
     }
 
@@ -764,6 +964,8 @@ def fit_report_text(res: dict) -> str:
         res["explanation"],
         "",
     ]
+    if res.get("notes"):
+        lines += ["NOTES"] + [f"  - {n}" for n in res["notes"]] + [""]
     if res["warnings"]:
         lines += ["WARNINGS"] + [f"  ! {w}" for w in res["warnings"]] + [""]
     lines.append("KEYS CONSIDERED (out of range before phrase shifts / phrase shifts / phrase rests / still out of range)")
@@ -775,7 +977,7 @@ def fit_report_text(res: dict) -> str:
         lines.append(f"  {vname:<8} {', '.join(insts) if insts else '(not covered)'}")
     lines += ["", "OCTAVE SHIFTS AND PHRASE RESTS"]
     for a in res["assignment"]:
-        lines.append(f"  {a['instrument']} ({a['players']} on {a['voice_name'].lower()}, range {a['range']}): {a['part_octave_text']}")
+        lines.append(f"  {a['part']} ({a['players']} on {a['voice_name'].lower()}, range {a['range']}): {a['part_octave_text']}")
         for s in a["phrase_shifts"]:
             lines.append(f"      {s['text']}")
         for r in a["rests"]:
