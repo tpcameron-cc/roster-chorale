@@ -26,7 +26,6 @@ from .instruments import INSTRUMENTS, ORDER, VOICE_NAMES, VOICES, Inst
 
 COST_RESIDUAL = 100     # per note still out of range
 COST_TACET = 15         # a part rests for a phrase it can't play in any octave (another part covers it)
-COST_MOSTLY_TACET = 100 # ...for more than half the phrases
 COST_PRE = 2            # per note that needed a phrase shift
 COST_SHIFT = 4          # per phrase shift
 COST_PREF = (0, 3, 6)   # voice preference rank; anything else costs COST_UNLISTED
@@ -199,32 +198,33 @@ def phrase_plan(assign: dict[str, str], fits: dict[tuple[str, str], Fit],
     """Decide which parts rest in phrases they can't play in any octave.
 
     A part rests for a phrase only when another part on the same voice plays that
-    phrase in range, so the line is never lost. Otherwise the notes stay and are
+    phrase in range, so the line is never lost, and it rests for at most half of its
+    phrases (nobody gets a nearly empty part). Otherwise the notes stay and are
     reported as out of range. Returns (cost, tacet phrases per instrument, notes left out of range).
     """
-    cost = 0.0
-    tacet: dict[str, set[int]] = {i: set() for i in assign}
-    residual = 0
     by_voice: dict[str, list[str]] = {}
     for i, v in assign.items():
         by_voice.setdefault(v, []).append(i)
+    max_rests = n_phrases // 2
+    cost = 0.0
+    residual = 0
+    tacet: dict[str, set[int]] = {i: set() for i in assign}
     for v, insts in by_voice.items():
-        troubled = [i for i in insts if fits[i, v].bad]
-        if not troubled:
+        if not any(fits[i, v].bad for i in insts):
             continue
-        phrases = set().union(*(fits[i, v].bad.keys() for i in troubled))
-        for ph in phrases:
-            bad_here = [i for i in insts if ph in fits[i, v].bad]
-            if len(bad_here) < len(insts):          # someone else covers it: the troubled parts rest
-                for i in bad_here:
-                    tacet[i].add(ph)
-                cost += COST_TACET * len(bad_here)
-            else:
-                n = sum(len(fits[i, v].bad[ph]) for i in bad_here)
-                cost += COST_RESIDUAL * n
-                residual += n
-    half = max(1, n_phrases) / 2
-    cost += sum(COST_MOSTLY_TACET for i, t in tacet.items() if len(t) > half)
+        for i in insts:
+            bad = fits[i, v].bad
+            if not bad:
+                continue
+            # phrases someone else on this voice plays cleanly, worst first
+            coverable = sorted((ph for ph in bad if any(ph not in fits[j, v].bad for j in insts if j != i)),
+                               key=lambda ph: -len(bad[ph]))
+            rests = set(coverable[:max_rests])
+            tacet[i] = rests
+            cost += COST_TACET * len(rests)
+            n = sum(len(ns) for ph, ns in bad.items() if ph not in rests)
+            cost += COST_RESIDUAL * n
+            residual += n
     return cost, tacet, residual
 
 
@@ -372,6 +372,21 @@ def _worst(kr: KeyResult, cfg: dict) -> str:
     return f"{f.pre_below} {name} note{'s' if f.pre_below != 1 else ''} below {pitch_label(lo)}"
 
 
+def _residual_text(kr: KeyResult, cfg: dict) -> str:
+    """e.g. '1 Trombone note (written D4) stays above its C4 limit whatever octave it's in'."""
+    parts = []
+    for name, f in kr.fits.items():
+        for d in ("above", "below"):
+            probs = [x for x in f.problems if x[2] == d]
+            if not probs:
+                continue
+            limit = cfg["ranges"][name][1] if d == "above" else cfg["ranges"][name][0]
+            written = ", ".join(pitch_label(pitch.Pitch(w)) for w in sorted({w for _, w, _ in probs}))
+            parts.append(f"{_plural(len(probs), name + ' note')} (written {written}) "
+                         f"{'stay' if len(probs) != 1 else 'stays'} {d} the {pitch_label(limit)} limit in every octave")
+    return "; ".join(parts) or f"{_plural(kr.residual, 'note')} stay out of range"
+
+
 def _plural(n: int, word: str) -> str:
     return f"{n} {word}{'' if n == 1 else 's'}"
 
@@ -398,7 +413,7 @@ def explain(results: list[KeyResult], ch: Chorale, cfg: dict) -> tuple[str, str]
         ru = results[1]
         worst = _worst(ru, cfg)
         if ru.residual > best.residual:
-            why = f"{worst} that no octave shift could fix" if worst else f"{ru.residual} notes out of range"
+            why = _residual_text(ru, cfg)
         elif ru.pre_out > best.pre_out and worst:
             why = f"{worst} (written)"
         elif ru.n_shifts + ru.n_tacet > best.n_shifts + best.n_tacet:
@@ -440,7 +455,16 @@ def build_part(ch: Chorale, v: str, inst: Inst, kr: KeyResult, f: Fit, grade_lab
             m.insert(0, ks)
         if b.ts:
             m.insert(0, meter.TimeSignature(b.ts))
-        for e in b.events:
+        events = _merge_rests(b, f)
+        if len(events) == 1 and (events[0].is_rest or events[0].phrase in f.tacet) and idx not in (0, len(bars) - 1):
+            r = note.Rest(quarterLength=events[0].dur)
+            r.fullMeasure = True
+            if events[0].fermata:
+                r.expressions.append(_fermata())
+            m.append(r)
+            part.append(m)
+            continue
+        for e in events:
             if e.is_rest or e.phrase in f.tacet:
                 n = note.Rest(quarterLength=e.dur)
             else:
@@ -454,7 +478,7 @@ def build_part(ch: Chorale, v: str, inst: Inst, kr: KeyResult, f: Fit, grade_lab
                 if e.tie and not (f.tacet & {e.phrase - 1, e.phrase + 1}):
                     n.tie = tie.Tie(e.tie)
             if e.fermata:
-                n.expressions.append(expressions.Fermata())
+                n.expressions.append(_fermata())
             m.append(n)
         if idx == 0 and b.padding:
             m.paddingLeft = b.padding
@@ -471,6 +495,27 @@ def build_part(ch: Chorale, v: str, inst: Inst, kr: KeyResult, f: Fit, grade_lab
     sc.insert(0, part)
     sc.atSoundingPitch = False
     return sc
+
+
+def _fermata() -> expressions.Fermata:
+    f = expressions.Fermata()
+    f.type = "upright"   # above the staff, as players expect
+    return f
+
+
+def _merge_rests(b: chmod.Bar, f: Fit) -> list[chmod.Ev]:
+    """Join consecutive rests in a bar (including phrases this part sits out) so a resting
+    player reads one rest, not a string of quarter rests."""
+    out: list[chmod.Ev] = []
+    for e in b.events:
+        silent = e.is_rest or e.phrase in f.tacet
+        if silent and out and (out[-1].is_rest) and not out[-1].fermata:
+            out[-1] = chmod.Ev(out[-1].offset, out[-1].dur + e.dur, None, e.fermata, None, e.phrase)
+        elif silent:
+            out.append(chmod.Ev(e.offset, e.dur, None, e.fermata, None, e.phrase))
+        else:
+            out.append(e)
+    return out
 
 
 def to_musicxml(sc: stream.Score) -> str:
@@ -521,8 +566,15 @@ def arrange(chorale_id: str, counts: dict[str, int], grade: str | float, with_pa
         warnings.append(f"No low instrument (trombone, euphonium, tuba, bari sax, bass clarinet or bassoon) on the roster: "
                         f"the bass line is played by {', '.join(bass_players)}, octave-displaced. It will sound thin.")
     if best.residual:
-        warnings.append(f"No allowed key fits everyone at {cfg['label']}. Concert {best.name} is the least-bad option; "
-                        f"{best.residual} note{'s' if best.residual != 1 else ''} are still out of range (listed in the fit report).")
+        notes_txt = []
+        for name, f in best.fits.items():
+            for n, w, d in f.problems:
+                notes_txt.append(f"{name} m. {n.measure}: written {pitch_label(pitch.Pitch(w))} ({d} "
+                                 f"{pitch_label(cfg['ranges'][name][1] if d == 'above' else cfg['ranges'][name][0])})")
+        shown = "; ".join(notes_txt[:4]) + ("; …" if len(notes_txt) > 4 else "")
+        warnings.append(f"No allowed key keeps every note inside the {cfg['label']} ranges. Concert {best.name} is the "
+                        f"least-bad option: {_plural(best.residual, 'note')} still out of range ({shown}). "
+                        f"Check these with the player, or widen that range in data/grades.json.")
 
     key_iv = key_interval(ch.key.tonic.name, best.tonic)
     for r in rhythm:   # name pitches in the chosen concert key

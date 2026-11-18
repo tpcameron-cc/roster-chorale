@@ -1,0 +1,578 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Roster Chorale</title>
+<meta name="description" content="Turn any Bach chorale into printable band parts for the band you actually have, at the grade you pick.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f6f2ea; --panel: #fffdf8; --ink: #1f1b16; --muted: #6b6257; --line: #e3dccf;
+  --accent: #7a2e1f; --accent-ink: #fff; --accent-soft: #f3e3dc; --good: #2f6b3a; --good-soft: #e3f0e4;
+  --bad: #b3261e; --bad-soft: #fbe4e1; --chip: #efe8dc; --focus: #c9692f;
+  --S: #8a3b2a; --A: #a8742a; --T: #3f6e5a; --B: #34507a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #171411; --panel: #211d19; --ink: #f1ebe2; --muted: #b0a597; --line: #3a332c;
+    --accent: #e2a07a; --accent-ink: #1b1410; --accent-soft: #3a2a22; --good: #8fcb98; --good-soft: #1f3324;
+    --bad: #ff8a80; --bad-soft: #3d1f1c; --chip: #2d2721; --focus: #e2a07a;
+    --S: #e59a86; --A: #e2bd7d; --T: #8fc7ab; --B: #9ab6e3;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #171411; --panel: #211d19; --ink: #f1ebe2; --muted: #b0a597; --line: #3a332c;
+  --accent: #e2a07a; --accent-ink: #1b1410; --accent-soft: #3a2a22; --good: #8fcb98; --good-soft: #1f3324;
+  --bad: #ff8a80; --bad-soft: #3d1f1c; --chip: #2d2721; --focus: #e2a07a;
+  --S: #e59a86; --A: #e2bd7d; --T: #8fc7ab; --B: #9ab6e3;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 Inter, system-ui, -apple-system, "Segoe UI", sans-serif; }
+h1, h2, h3 { font-family: Fraunces, Georgia, serif; font-weight: 700; letter-spacing: -0.01em; margin: 0; }
+a { color: var(--accent); }
+.wrap { max-width: 1040px; margin: 0 auto; padding: 0 16px; }
+header.top { padding: 32px 0 8px; }
+header.top h1 { font-size: clamp(30px, 5vw, 44px); }
+header.top p { color: var(--muted); max-width: 640px; margin: 6px 0 0; font-size: 16px; }
+.status { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); margin-top: 12px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.dot.ok { background: var(--good); } .dot.warm { background: var(--focus); animation: pulse 1s infinite alternate; } .dot.err { background: var(--bad); }
+@keyframes pulse { to { opacity: .3; } }
+
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px; margin: 18px 0; }
+.card h2 { font-size: 22px; display: flex; align-items: baseline; gap: 10px; }
+.step { font: 600 12px Inter, sans-serif; color: var(--accent); background: var(--accent-soft); border-radius: 999px; padding: 2px 9px; letter-spacing: .04em; text-transform: uppercase; }
+.sub { color: var(--muted); margin: 4px 0 14px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 760px) { .grid2 { grid-template-columns: 1fr; } }
+label.lbl { display: block; font-weight: 600; font-size: 13px; margin-bottom: 6px; }
+textarea, input[type=search], input[type=number], select {
+  width: 100%; font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px;
+}
+textarea { min-height: 120px; resize: vertical; font: 13px/1.4 ui-monospace, Consolas, monospace; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+button, .btn {
+  font: 600 14px Inter, sans-serif; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  border-radius: 10px; padding: 9px 14px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; text-decoration: none;
+}
+button:hover, .btn:hover { border-color: var(--muted); }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.primary:hover { filter: brightness(1.08); }
+button:disabled { opacity: .5; cursor: not-allowed; }
+.drop { border: 1.5px dashed var(--line); border-radius: 12px; padding: 18px; text-align: center; color: var(--muted); cursor: pointer; transition: .15s; }
+.drop.over, .drop:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--ink); }
+.drop input { display: none; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.err { color: var(--bad); background: var(--bad-soft); border-radius: 10px; padding: 10px 12px; margin-top: 10px; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+
+.roster-out { margin-top: 16px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { background: var(--chip); border-radius: 999px; padding: 4px 6px 4px 12px; display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }
+.chip input { width: 52px; padding: 2px 6px; border-radius: 999px; text-align: center; background: var(--panel); }
+.total { font-weight: 600; margin-top: 10px; }
+.unrec { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
+.unrec-row { display: grid; grid-template-columns: 1fr 200px; gap: 10px; align-items: center; padding: 4px 0; }
+@media (max-width: 520px) { .unrec-row { grid-template-columns: 1fr; } }
+
+.picker { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; }
+@media (max-width: 760px) { .picker { grid-template-columns: 1fr; } }
+.list { max-height: 260px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; margin-top: 8px; background: var(--bg); }
+.list button { display: flex; width: 100%; justify-content: space-between; gap: 10px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: none; font-weight: 400; text-align: left; padding: 8px 12px; }
+.list button:last-child { border-bottom: 0; }
+.list button[aria-selected=true] { background: var(--accent-soft); font-weight: 600; }
+.list .k { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.chosen { margin-top: 10px; font-size: 14px; }
+.grades { display: flex; gap: 6px; }
+.grades label { flex: 1; }
+.grades input { position: absolute; opacity: 0; pointer-events: none; }
+.grades span { display: block; text-align: center; border: 1px solid var(--line); border-radius: 10px; padding: 10px 0; cursor: pointer; font-weight: 600; }
+.grades input:checked + span { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.grades input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: 2px; }
+.arrange-row { margin-top: 18px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.spinner { width: 16px; height: 16px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.keybox { display: grid; grid-template-columns: auto 1fr; gap: 18px; align-items: center; }
+@media (max-width: 600px) { .keybox { grid-template-columns: 1fr; } }
+.keybig { background: var(--good-soft); color: var(--good); border-radius: 14px; padding: 14px 18px; text-align: center; min-width: 170px; }
+.keybig.bad { background: var(--bad-soft); color: var(--bad); }
+.keybig .lab { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+.keybig .key { font-family: Fraunces, Georgia, serif; font-size: 30px; font-weight: 700; line-height: 1.1; }
+.summary { font-weight: 600; font-size: 16px; }
+.warns { margin: 12px 0 0; padding: 0; list-style: none; }
+.warns li { background: var(--bad-soft); color: var(--bad); border-radius: 10px; padding: 8px 12px; margin-top: 6px; }
+table.keys { border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 8px; }
+table.keys th, table.keys td { border-bottom: 1px solid var(--line); padding: 5px 8px; text-align: left; }
+table.keys td.n, table.keys th.n { text-align: right; font-variant-numeric: tabular-nums; }
+table.keys tr.win td { font-weight: 600; }
+.voices { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 10px; }
+@media (max-width: 700px) { .voices { grid-template-columns: repeat(2, 1fr); } }
+.voice { border-radius: 12px; border: 1px solid var(--line); padding: 10px 12px; border-top: 4px solid var(--c); }
+.voice h3 { font-size: 16px; color: var(--c); }
+.voice ul { list-style: none; margin: 6px 0 0; padding: 0; }
+.voice li { display: flex; justify-content: space-between; }
+.fit { margin-top: 10px; }
+.fit-inst { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.fit-inst:last-child { border-bottom: 0; }
+.fit-inst .hd { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.fit-inst ul { margin: 4px 0 0; padding-left: 18px; }
+.fit-inst li.prob { color: var(--bad); }
+.tag { font-size: 12px; border-radius: 999px; padding: 1px 8px; background: var(--chip); color: var(--muted); }
+.tag.v { color: var(--c); }
+details summary { cursor: pointer; font-weight: 600; margin-top: 12px; }
+.rhythm { columns: 2; font-size: 13px; margin: 8px 0 0; padding-left: 18px; }
+@media (max-width: 700px) { .rhythm { columns: 1; } }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; }
+
+#parts { margin: 18px 0 60px; }
+.page { background: #fff; color: #111; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,.12), 0 8px 24px rgba(0,0,0,.06); padding: 28px 30px 20px; margin: 0 auto 22px; max-width: 850px; }
+.page-head { display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; border-bottom: 1.5px solid #111; padding-bottom: 8px; margin-bottom: 6px; font-family: Georgia, serif; }
+.page-head .t { font-size: 22px; font-weight: 700; font-family: Fraunces, Georgia, serif; }
+.page-head .pn { font-size: 20px; font-weight: 700; text-align: right; font-family: Fraunces, Georgia, serif; }
+.page-head .m { font-size: 13px; color: #444; }
+.page-head .m.r { text-align: right; }
+.page .svg svg { width: 100%; height: auto; display: block; }
+.page .svg { color: #111; }
+.page .rendering { color: #777; font-size: 14px; padding: 30px 0; text-align: center; }
+.page .dl { font-size: 12px; margin-top: 6px; text-align: right; }
+.page .dl a { color: #7a2e1f; }
+footer { color: var(--muted); font-size: 13px; padding: 10px 0 40px; }
+.hidden { display: none !important; }
+
+@media print {
+  @page { size: letter; margin: 0.45in; }
+  body { background: #fff; }
+  body > *:not(#parts-wrap) { display: none !important; }
+  #parts-wrap .partsbar { display: none !important; }
+  #parts { margin: 0; }
+  .page { box-shadow: none; border-radius: 0; padding: 0; margin: 0; max-width: none; break-after: page; page-break-after: always; }
+  .page:last-child { break-after: auto; page-break-after: auto; }
+  .page .dl { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>Roster Chorale</h1>
+    <p>Turn any Bach chorale into band parts for the band you actually have: voiced for your roster, in a key that keeps everyone in range, at the grade you pick.</p>
+    <div class="status" id="status"><span class="dot warm"></span><span>Warming up the arranger…</span></div>
+  </header>
+
+  <!-- STEP 1: ROSTER -->
+  <section class="card" id="roster-card">
+    <h2><span class="step">Step 1</span> Your roster</h2>
+    <p class="sub">One row per student (any column order) or instrument-and-count pairs. Messy names like “Bb Clar”, “Alto Sax 1” or “Tbn” are fine. Nothing is stored on the server.</p>
+    <div class="grid2">
+      <div>
+        <label class="lbl">Upload a spreadsheet</label>
+        <label class="drop" id="drop">
+          <input type="file" id="file" accept=".xlsx,.xlsm,.csv,.txt,.tsv">
+          <div><strong>Choose an .xlsx or .csv</strong><br><span class="small">or drag it here</span></div>
+        </label>
+        <p class="small muted">No roster handy? <a href="/samples/lopsided-band.xlsx" download>Download the sample lopsided band</a>.</p>
+      </div>
+      <div>
+        <label class="lbl" for="paste">…or paste rows from Excel or Google Sheets</label>
+        <textarea id="paste" placeholder="Name&#9;Instrument&#10;Ava&#9;Flute&#10;Liam&#9;Bb Clar&#10;Sam&#9;Bari"></textarea>
+        <div class="row" style="margin-top:8px"><button id="paste-btn">Read pasted rows</button></div>
+      </div>
+    </div>
+    <div id="roster-err" class="err hidden" role="alert"></div>
+    <div id="roster-out" class="roster-out hidden" aria-live="polite">
+      <label class="lbl">Cleaned roster <span class="muted small" id="roster-src"></span></label>
+      <div class="chips" id="chips"></div>
+      <div class="row small" style="margin-top:10px">
+        <select id="add-inst" style="width:auto"><option value="">+ Add an instrument…</option></select>
+      </div>
+      <div class="total" id="total"></div>
+      <div class="unrec hidden" id="unrec">
+        <label class="lbl">Names I didn't recognise: tell me what they are</label>
+        <div id="unrec-rows"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- STEP 2: CHORALE + GRADE -->
+  <section class="card">
+    <h2><span class="step">Step 2</span> Chorale and grade</h2>
+    <div class="picker" style="margin-top:12px">
+      <div>
+        <label class="lbl" for="search">Find a chorale (BWV number or title)</label>
+        <div class="row">
+          <input type="search" id="search" placeholder="e.g. 66.6 or Nun danket" style="flex:1;min-width:180px" autocomplete="off">
+          <button id="surprise" title="Pick a random chorale">🎲 Surprise me</button>
+        </div>
+        <div class="list" id="list" role="listbox" aria-label="Chorales"></div>
+        <div class="chosen" id="chosen"></div>
+      </div>
+      <div>
+        <label class="lbl">Target grade</label>
+        <div class="grades" role="radiogroup" aria-label="Target grade">
+          <label><input type="radio" name="grade" value="0.5"><span>½</span></label>
+          <label><input type="radio" name="grade" value="1" checked><span>1</span></label>
+          <label><input type="radio" name="grade" value="2"><span>2</span></label>
+          <label><input type="radio" name="grade" value="3"><span>3</span></label>
+        </div>
+        <p class="small muted" style="margin-top:10px">The grade sets each instrument's range, which concert keys are allowed, and how much the rhythm is simplified (grade ½–1: eighth notes merged into quarters; grade 2: sixteenths into eighths; grade 3: as written).</p>
+      </div>
+    </div>
+    <div class="arrange-row">
+      <button class="primary" id="arrange" disabled>Arrange</button>
+      <span id="arrange-msg" class="muted small"></span>
+    </div>
+    <div id="arrange-err" class="err hidden" role="alert"></div>
+  </section>
+
+  <!-- RESULTS -->
+  <section class="card hidden" id="result" aria-live="polite">
+    <div class="keybox">
+      <div class="keybig" id="keybig"><div class="lab">Concert key</div><div class="key" id="key-name"></div><div class="small" id="key-orig"></div></div>
+      <div>
+        <div class="summary" id="summary"></div>
+        <p id="explanation" style="margin:6px 0 0"></p>
+        <ul class="warns" id="warns"></ul>
+      </div>
+    </div>
+    <details>
+      <summary>All keys considered</summary>
+      <table class="keys" id="keys"></table>
+    </details>
+
+    <h3 style="margin-top:20px;font-size:18px">Who plays what</h3>
+    <div class="voices" id="voices"></div>
+
+    <h3 style="margin-top:22px;font-size:18px">Fit report</h3>
+    <p class="small muted" style="margin:2px 0 0">Octave shifts happen for a whole part first, then phrase by phrase (fermata to fermata), never note by note. When a phrase can't fit an instrument in any octave and another instrument covers that line, that part rests for the phrase.</p>
+    <div class="fit" id="fit"></div>
+    <details id="rhythm-wrap">
+      <summary id="rhythm-sum"></summary>
+      <ul class="rhythm" id="rhythm"></ul>
+    </details>
+  </section>
+</div>
+
+<div class="wrap hidden" id="parts-wrap">
+  <div class="card partsbar">
+    <h2><span class="step">Step 3</span> Print or download</h2>
+    <p class="sub">Each part prints on its own page. In the print dialog, choose “Save as PDF” for a PDF.</p>
+    <div class="actions">
+      <button class="primary" id="print">🖨 Print all parts</button>
+      <button id="zip">⬇ Download MusicXML (.zip)</button>
+      <button id="report-dl">⬇ Fit report (.txt)</button>
+    </div>
+  </div>
+  <div id="parts"></div>
+</div>
+
+<div class="wrap"><footer>Music: J. S. Bach chorales from the <a href="https://www.music21.org/">music21</a> corpus. Notation by <a href="https://www.verovio.org/">Verovio</a>. Ranges are starting values: check them against your state's grading guide.</footer></div>
+
+<script src="https://cdn.jsdelivr.net/npm/verovio@6.4.1/dist/verovio-toolkit-wasm.js" defer></script>
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const VOICE = { S: "Soprano", A: "Alto", T: "Tenor", B: "Bass" };
+const VKEY = { Soprano: "S", Alto: "A", Tenor: "T", Bass: "B" };
+const LS = {
+  get(k, d) { try { const v = localStorage.getItem("rc." + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("rc." + k, JSON.stringify(v)); } catch {} },
+};
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+const state = {
+  instruments: [], chorales: [],
+  roster: LS.get("roster", null),          // {counts:{}, unrecognized:[{name,count}], source}
+  classify: LS.get("classify", {}),        // raw name -> standard name or ""
+  chorale: LS.get("chorale", "bwv66.6"),
+  grade: LS.get("grade", "1"),
+  result: null,
+  lastBody: null,   // the request that produced `result`, reused for the zip download
+};
+
+// ---------- warm-up ----------
+function setStatus(kind, text) {
+  $("#status").innerHTML = `<span class="dot ${kind}"></span><span>${esc(text)}</span>`;
+}
+async function api(path, opts = {}) {
+  const r = await fetch(path, opts);
+  const ct = r.headers.get("content-type") || "";
+  if (!r.ok) {
+    let msg = `Server error ${r.status}`;
+    if (ct.includes("json")) { const j = await r.json(); msg = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail); }
+    throw new Error(msg);
+  }
+  return ct.includes("json") ? r.json() : r.blob();
+}
+async function warmUp() {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      setStatus("warm", attempt === 1 ? "Warming up the arranger…" : "Still warming up (the first request loads the Bach corpus)…");
+      const d = await api("/api/chorales");
+      state.instruments = d.instruments; state.chorales = d.chorales;
+      setStatus("ok", `Ready: ${d.chorales.length} Bach chorales`);
+      initPicker(); initAddInst(); renderRoster(); updateArrangeBtn();
+      return;
+    } catch (e) { if (attempt === 3) setStatus("err", "Couldn't reach the arranger. Reload to try again. (" + e.message + ")"); }
+  }
+}
+
+// ---------- roster ----------
+async function sendRoster(form, source) {
+  $("#roster-err").classList.add("hidden");
+  try {
+    const d = await api("/api/roster", { method: "POST", body: form });
+    state.roster = { counts: d.counts, unrecognized: d.unrecognized, source };
+    LS.set("roster", state.roster);
+    renderRoster(); updateArrangeBtn();
+  } catch (e) {
+    $("#roster-err").textContent = e.message; $("#roster-err").classList.remove("hidden");
+  }
+}
+$("#file").addEventListener("change", (ev) => {
+  const f = ev.target.files[0]; if (!f) return;
+  const fd = new FormData(); fd.append("file", f); sendRoster(fd, f.name); ev.target.value = "";
+});
+const drop = $("#drop");
+["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", (e) => {
+  const f = e.dataTransfer.files[0]; if (!f) return;
+  const fd = new FormData(); fd.append("file", f); sendRoster(fd, f.name);
+});
+$("#paste-btn").addEventListener("click", () => {
+  const t = $("#paste").value; const fd = new FormData(); fd.append("text", t); sendRoster(fd, "pasted rows");
+});
+
+function effectiveCounts() {
+  const out = {};
+  if (!state.roster) return out;
+  for (const [k, v] of Object.entries(state.roster.counts)) if (v > 0) out[k] = (out[k] || 0) + v;
+  for (const u of state.roster.unrecognized || []) {
+    const std = state.classify[u.name];
+    if (std) out[std] = (out[std] || 0) + u.count;
+  }
+  const ordered = {};
+  for (const k of state.instruments) if (out[k]) ordered[k] = out[k];
+  return ordered;
+}
+function renderRoster() {
+  const r = state.roster;
+  if (!r || !state.instruments.length) return;
+  $("#roster-out").classList.remove("hidden");
+  $("#roster-src").textContent = r.source ? `from ${r.source}` : "";
+  const eff = effectiveCounts();
+  $("#chips").innerHTML = Object.entries(eff).map(([k, v]) =>
+    `<span class="chip">${esc(k)} <input type="number" min="0" max="200" value="${v}" data-inst="${esc(k)}" aria-label="${esc(k)} players"></span>`
+  ).join("") || `<span class="muted">No recognised instruments yet.</span>`;
+  $("#chips").querySelectorAll("input").forEach((inp) => inp.addEventListener("change", () => {
+    const k = inp.dataset.inst, n = Math.max(0, parseInt(inp.value || "0", 10));
+    // fold any classified extras into the base count so the number shown is the number used
+    const extra = (r.unrecognized || []).filter((u) => state.classify[u.name] === k).reduce((a, u) => a + u.count, 0);
+    r.counts[k] = Math.max(0, n - extra);
+    if (n === 0) { delete r.counts[k]; (r.unrecognized || []).forEach((u) => { if (state.classify[u.name] === k) state.classify[u.name] = ""; }); LS.set("classify", state.classify); }
+    LS.set("roster", r); renderRoster(); updateArrangeBtn();
+  }));
+  const tot = Object.values(eff).reduce((a, b) => a + b, 0);
+  $("#total").textContent = `${tot} player${tot === 1 ? "" : "s"} on ${Object.keys(eff).length} instrument${Object.keys(eff).length === 1 ? "" : "s"}`;
+  const un = r.unrecognized || [];
+  $("#unrec").classList.toggle("hidden", !un.length);
+  $("#unrec-rows").innerHTML = un.map((u, i) => `
+    <div class="unrec-row"><div><strong>${esc(u.name)}</strong> <span class="muted">× ${u.count}</span></div>
+    <select data-i="${i}" aria-label="What is ${esc(u.name)}?"><option value="">Leave out of the arrangement</option>
+    ${state.instruments.map((s) => `<option ${state.classify[u.name] === s ? "selected" : ""}>${esc(s)}</option>`).join("")}</select></div>`).join("");
+  $("#unrec-rows").querySelectorAll("select").forEach((sel) => sel.addEventListener("change", () => {
+    state.classify[un[+sel.dataset.i].name] = sel.value; LS.set("classify", state.classify); renderRoster(); updateArrangeBtn();
+  }));
+}
+function initAddInst() {
+  const sel = $("#add-inst");
+  sel.innerHTML = `<option value="">+ Add an instrument…</option>` + state.instruments.map((s) => `<option>${esc(s)}</option>`).join("");
+  sel.addEventListener("change", () => {
+    if (!sel.value) return;
+    if (!state.roster) state.roster = { counts: {}, unrecognized: [], source: "typed in" };
+    state.roster.counts[sel.value] = (state.roster.counts[sel.value] || 0) + 1;
+    LS.set("roster", state.roster); sel.value = ""; renderRoster(); updateArrangeBtn();
+  });
+}
+
+// ---------- chorale picker ----------
+function choraleLabel(c) { return c.title.includes("BWV") ? c.title : `${c.title}`; }
+function renderList() {
+  const q = $("#search").value.trim().toLowerCase().replace(/^bwv\s*/, "");
+  let items = state.chorales;
+  if (q) items = items.filter((c) => c.bwv.startsWith(q) || c.title.toLowerCase().includes(q) || c.id === "bwv" + q);
+  const shown = items.slice(0, 80);
+  $("#list").innerHTML = shown.map((c) =>
+    `<button role="option" aria-selected="${c.id === state.chorale}" data-id="${c.id}"><span>${esc(choraleLabel(c))}</span><span class="k">BWV ${esc(c.bwv)} · ${esc(c.key)}</span></button>`
+  ).join("") + (items.length > shown.length ? `<div class="small muted" style="padding:8px 12px">${items.length - shown.length} more: keep typing to narrow it down</div>` : "")
+    + (!items.length ? `<div class="small muted" style="padding:8px 12px">No chorale matches “${esc(q)}”.</div>` : "");
+  $("#list").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => choose(b.dataset.id)));
+}
+function choose(id) {
+  state.chorale = id; LS.set("chorale", id);
+  const c = state.chorales.find((x) => x.id === id);
+  $("#chosen").innerHTML = c ? `Chosen: <strong>${esc(choraleLabel(c))}</strong> <span class="muted">(BWV ${esc(c.bwv)}, ${esc(c.key)}, ${c.measures} bars)</span>` : "";
+  renderList(); updateArrangeBtn();
+}
+function initPicker() {
+  if (!state.chorales.find((c) => c.id === state.chorale)) state.chorale = state.chorales[0].id;
+  $("#search").addEventListener("input", renderList);
+  $("#surprise").addEventListener("click", () => {
+    const c = state.chorales[Math.floor(Math.random() * state.chorales.length)];
+    $("#search").value = ""; choose(c.id);
+    const el = $(`#list button[data-id="${CSS.escape(c.id)}"]`); if (el) el.scrollIntoView({ block: "nearest" });
+  });
+  choose(state.chorale);
+}
+document.querySelectorAll('input[name=grade]').forEach((r) => {
+  r.checked = r.value === state.grade;
+  r.addEventListener("change", () => { state.grade = r.value; LS.set("grade", r.value); });
+});
+function updateArrangeBtn() {
+  const n = Object.keys(effectiveCounts()).length;
+  $("#arrange").disabled = !(n && state.chorale && state.chorales.length);
+  $("#arrange-msg").textContent = n ? "" : "Add a roster first.";
+}
+
+// ---------- arrange ----------
+function body() { return JSON.stringify({ roster: effectiveCounts(), chorale: state.chorale, grade: state.grade }); }
+$("#arrange").addEventListener("click", async () => {
+  const btn = $("#arrange");
+  btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> Arranging…`;
+  $("#arrange-err").classList.add("hidden");
+  const slow = setTimeout(() => { $("#arrange-msg").textContent = "Warming up the server: the first arrangement can take a few seconds."; }, 2500);
+  try {
+    const b = body();
+    const res = await api("/api/arrange", { method: "POST", headers: { "content-type": "application/json" }, body: b });
+    state.result = res; state.lastBody = b;
+    renderResult(res);
+    await renderParts(res);
+  } catch (e) {
+    $("#arrange-err").textContent = e.message; $("#arrange-err").classList.remove("hidden");
+  } finally {
+    clearTimeout(slow); $("#arrange-msg").textContent = "";
+    btn.innerHTML = "Arrange"; updateArrangeBtn();
+  }
+});
+
+function renderResult(r) {
+  $("#result").classList.remove("hidden");
+  $("#keybig").classList.toggle("bad", r.least_bad);
+  $("#keybig .lab").textContent = r.least_bad ? "Least-bad key" : "Concert key";
+  $("#key-name").textContent = r.key.concert;
+  $("#key-orig").textContent = `Bach: ${r.chorale.original_key}`;
+  $("#summary").textContent = r.summary;
+  $("#explanation").textContent = r.explanation;
+  $("#warns").innerHTML = r.warnings.map((w) => `<li>${esc(w)}</li>`).join("");
+  $("#keys").innerHTML = `<tr><th>Concert key</th><th class="n">Out of range as written</th><th class="n">Phrase shifts</th><th class="n">Phrase rests</th><th class="n">Still out of range</th><th>Biggest problem</th></tr>` +
+    r.keys_considered.map((k, i) => `<tr class="${i === 0 ? "win" : ""}"><td>${esc(k.key)}${i === 0 ? " ✓" : ""}</td><td class="n">${k.out_before_phrase_shifts}</td><td class="n">${k.phrase_shifts}</td><td class="n">${k.rests}</td><td class="n">${k.out_of_range}</td><td>${esc(k.worst || "–")}</td></tr>`).join("");
+  $("#voices").innerHTML = Object.entries(r.voices).map(([v, insts]) => {
+    const rows = r.assignment.filter((a) => a.voice_name === v);
+    return `<div class="voice" style="--c:var(--${VKEY[v]})"><h3>${v}</h3><ul>${rows.map((a) => `<li><span>${esc(a.instrument)}</span><span class="muted">${a.players}</span></li>`).join("") || `<li class="muted">not covered</li>`}</ul></div>`;
+  }).join("");
+  $("#fit").innerHTML = r.assignment.map((a) => {
+    const items = [];
+    items.push(`<li>${esc(a.part_octave_text[0].toUpperCase() + a.part_octave_text.slice(1))}</li>`);
+    a.phrase_shifts.forEach((s) => items.push(`<li>${esc(s.text)}</li>`));
+    a.rests.forEach((s) => items.push(`<li>${esc(s.text)}</li>`));
+    a.problems.forEach((p) => items.push(`<li class="prob">Out of range: ${esc(p.text)}</li>`));
+    return `<div class="fit-inst"><div class="hd"><strong>${esc(a.part_name)} <span class="muted" style="font-weight:400">× ${a.players}</span></strong>
+      <span><span class="tag v" style="--c:var(--${a.voice})">${esc(a.voice_name)} line</span> <span class="tag">range ${esc(a.range)}</span></span></div><ul>${items.join("")}</ul></div>`;
+  }).join("");
+  const rh = r.rhythm;
+  $("#rhythm-sum").textContent = rh.length ? `Rhythm simplifications for ${r.grade.label} (${rh.length})` : `Rhythm: played as written at ${r.grade.label}`;
+  $("#rhythm").innerHTML = rh.map((x) => `<li><strong>${esc(x.voice_name)}</strong> m. ${x.measure}, beat ${esc(x.beat)}: ${esc(x.change)}</li>`).join("");
+}
+
+// ---------- Verovio ----------
+let tkPromise = null;
+function toolkit() {
+  if (tkPromise) return tkPromise;
+  tkPromise = new Promise((resolve, reject) => {
+    const started = Date.now();
+    (function wait() {
+      // The WASM runtime may already be up by the time we look, so just try to build a
+      // toolkit and retry until it works (or time out).
+      if (window.verovio && verovio.module) {
+        try { const tk = new verovio.toolkit(); if (tk && tk.getVersion()) return resolve(tk); } catch (e) { /* not ready */ }
+      }
+      if (Date.now() - started > 30000) return reject(new Error("The notation engine (Verovio) didn't load. Check your connection and reload."));
+      setTimeout(wait, 100);
+    })();
+  });
+  return tkPromise;
+}
+
+async function renderParts(r) {
+  $("#parts-wrap").classList.remove("hidden");
+  const c = r.chorale;
+  const title = c.title.includes("BWV") ? c.title : `${c.title}`;
+  $("#parts").innerHTML = r.parts.map((p, i) => {
+    const a = r.assignment.find((x) => x.instrument === p.instrument);
+    return `<article class="page" id="part-${i}">
+      <div class="page-head">
+        <div class="t">${esc(title)}</div><div class="pn">${esc(p.part_name)}</div>
+        <div class="m">J. S. Bach · BWV ${esc(c.bwv)} · Concert ${esc(r.key.concert)}</div>
+        <div class="m r">${esc(r.grade.label)} · ${esc(a.voice_name)} line</div>
+      </div>
+      <div class="svg"><div class="rendering">Engraving…</div></div>
+      <div class="dl"><a href="#" data-i="${i}">Download this part (MusicXML)</a></div>
+    </article>`;
+  }).join("");
+  $("#parts").querySelectorAll(".dl a").forEach((a) => a.addEventListener("click", (e) => {
+    e.preventDefault(); const p = r.parts[+a.dataset.i];
+    saveBlob(new Blob([p.musicxml], { type: "application/vnd.recordare.musicxml+xml" }), p.filename);
+  }));
+  let tk;
+  try { tk = await toolkit(); }
+  catch (e) { $("#parts").querySelectorAll(".rendering").forEach((el) => { el.textContent = e.message; }); return; }
+  tk.setOptions({
+    pageWidth: 1900, pageHeight: 2500, scale: 50, adjustPageHeight: true,
+    pageMarginTop: 30, pageMarginBottom: 30, pageMarginLeft: 20, pageMarginRight: 20,
+    header: "none", footer: "none", breaks: "auto", svgViewBox: true, mnumInterval: 1,
+    spacingSystem: 10,
+  });
+  for (let i = 0; i < r.parts.length; i++) {
+    const holder = $(`#part-${i} .svg`);
+    try {
+      // the page header already names the part, so drop the label in front of each staff
+      tk.loadData(r.parts[i].musicxml
+        .replace(/<part-name>[^<]*<\/part-name>/, "<part-name></part-name>")
+        .replace(/<part-abbreviation>[^<]*<\/part-abbreviation>/, "<part-abbreviation></part-abbreviation>"));
+      let svg = "";
+      for (let pg = 1; pg <= tk.getPageCount(); pg++) svg += tk.renderToSVG(pg);
+      holder.innerHTML = svg;
+    } catch (e) { holder.innerHTML = `<div class="rendering">Couldn't engrave this part: ${esc(e.message || e)}</div>`; }
+    await new Promise((res) => setTimeout(res, 0));   // keep the page responsive
+  }
+}
+
+function saveBlob(blob, name) {
+  const url = URL.createObjectURL(blob); const a = document.createElement("a");
+  a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+$("#print").addEventListener("click", () => window.print());
+$("#zip").addEventListener("click", async () => {
+  const btn = $("#zip"); btn.disabled = true;
+  try {
+    const blob = await api("/api/zip", { method: "POST", headers: { "content-type": "application/json" }, body: state.lastBody });
+    saveBlob(blob, `${state.result.chorale.id}-grade${state.result.grade.value}-parts.zip`);
+  } catch (e) { alert(e.message); } finally { btn.disabled = false; }
+});
+$("#report-dl").addEventListener("click", () => {
+  const r = state.result; if (!r) return;
+  saveBlob(new Blob([r.fit_report_text], { type: "text/plain" }), `${r.chorale.id}-grade${r.grade.value}-fit-report.txt`);
+});
+
+warmUp();
+toolkit().catch(() => {});
+</script>
+</body>
+</html>

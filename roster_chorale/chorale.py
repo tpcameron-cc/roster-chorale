@@ -156,12 +156,37 @@ def load(cid: str) -> Chorale:
                 fermata = any(isinstance(x, expressions.Fermata) for x in n.expressions)
                 bar.events.append(Ev(off, ql, p, fermata, n.tie.type if n.tie else None))
                 end = off + ql
+            if bars and bars[-1].number == bar.number:
+                # a bar split in two by a repeat sign (same number twice): join the halves
+                prev = bars[-1]
+                shift = prev.length
+                for e in bar.events:
+                    e.offset += shift
+                prev.events.extend(bar.events)
+                continue
             bars.append(bar)
         voices[v] = bars
     k = score.analyze("key")
     ch = Chorale(cid, meta["bwv"], meta["title"], k, voices)
+    share_fermatas(ch)
     mark_phrases(ch)
     return ch
+
+
+def share_fermatas(ch: Chorale) -> None:
+    """Give every voice a fermata wherever a phrase ends.
+
+    Some corpus files mark fermatas only in the soprano, but every player needs them.
+    A voice gets a fermata on whatever it is playing (note or rest) at that moment.
+    """
+    ends = phrase_boundaries(ch)
+    total = max(sum(b.length for b in bars) for bars in ch.voices.values())
+    if any(e.fermata for t, _, e in _timeline(ch.voices["S"]) if abs(t + e.dur - total) < EPS):
+        ends = ends + [total]
+    for bars in ch.voices.values():
+        for t, _, e in _timeline(bars):
+            if any(t < x - EPS and t + e.dur >= x - EPS for x in ends):
+                e.fermata = True
 
 
 def _timeline(bars: list[Bar]):
