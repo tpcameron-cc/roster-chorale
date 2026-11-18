@@ -36,7 +36,7 @@ def test_alias_count_is_at_least_25():
     assert len(ALIASES) >= 25
 
 
-@pytest.mark.parametrize("raw", ["Percussion", "Piano", "Snare", "Violin", "", "   "])
+@pytest.mark.parametrize("raw", ["Piano", "Harp", "Kazoo", "Guitar", "", "   "])
 def test_unrecognised_names_return_none(raw):
     assert canonical(raw) is None
 
@@ -46,8 +46,8 @@ def test_unrecognised_names_return_none(raw):
 # ---------------------------------------------------------------------------
 def test_sample_xlsx_per_student(sample_xlsx):
     r = parse_upload(sample_xlsx.name, sample_xlsx.read_bytes())
-    assert r.ordered_counts() == LOPSIDED
-    assert r.unrecognized == {"Percussion": 2, "Piano": 1}
+    assert r.ordered_counts() == {**LOPSIDED, "Percussion": 2}
+    assert r.unrecognized == {"Piano": 1}
     assert r.layout == "per-student"
     assert r.instrument_column == "Instrument"     # not the first column
 
@@ -99,7 +99,7 @@ def test_pasted_rows_without_header_find_the_instrument_column():
 def test_locker_number_column_is_not_a_count(sample_xlsx):
     # the sample has a "Locker #" column full of numbers; it must not be read as counts
     r = parse_upload(sample_xlsx.name, sample_xlsx.read_bytes())
-    assert sum(r.counts.values()) == 28
+    assert sum(r.counts.values()) == 30
 
 
 def test_same_roster_from_xlsx_and_paste(sample_xlsx):

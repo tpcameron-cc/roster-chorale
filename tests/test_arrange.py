@@ -65,7 +65,9 @@ def test_key_search_minimises_out_of_range_notes(cid, roster):
     ch, _ = chmod.simplify(chmod.load(cid), cfg["rhythm"])
     results = search_keys(ch, roster, cfg)
     best = results[0]
-    assert best.residual == min(r.residual for r in results)
+    # fewest notes out of range (a part pushed below the bass counts as 5 such notes)
+    assert best.rank[0] == min(r.rank[0] for r in results)
+    assert best.inverted == 0 or all(r.inverted for r in results)
     # every allowed key was considered
     mode = ch.key.mode
     assert len(results) == len(cfg["keys"][mode])
@@ -258,18 +260,24 @@ def expected_concert(ch, v, f, key_iv):
     return out
 
 
+ORCHESTRA = {"Flute": 2, "Oboe": 2, "Clarinet": 2, "Bassoon": 2, "Horn": 4, "Trumpet": 2, "Trombone": 3, "Tuba": 1,
+             "Bells": 1, "Xylophone": 1, "Marimba": 1, "Vibraphone": 1,
+             "Violin": 16, "Viola": 6, "Cello": 5, "Double Bass": 3}
+
+
+@pytest.mark.parametrize("roster", [LOPSIDED, ORCHESTRA], ids=["band", "orchestra"])
 @pytest.mark.parametrize("grade", ["1", "3"])
 @pytest.mark.parametrize("cid", SAMPLE_CHORALES[:6])
-def test_written_parts_transpose_back_to_the_assigned_voice(cid, grade):
+def test_written_parts_transpose_back_to_the_assigned_voice(cid, grade, roster):
     cfg = grade_cfg(grade)
     ch, _ = chmod.simplify(chmod.load(cid), cfg["rhythm"])
-    best = search_keys(ch, LOPSIDED, cfg)[0]
+    best = search_keys(ch, roster, cfg)[0]
     key_iv = key_interval(ch.key.tonic.name, best.tonic)
     for name, v in best.assign.items():
         inst = INSTRUMENTS[name]
         xml = to_musicxml(build_part(ch, v, inst, best, best.fits[name], cfg["label"]))
         part = converter.parseData(xml, format="musicxml").parts[0]
-        sounding = inst.factory().transposition   # written -> sounding
+        sounding = inst.written_interval.reverse() if inst.written_semitones else None   # written -> sounding
         actual = {}
         for n in part.flatten().notes:
             if n.tie is not None and n.tie.type in ("stop", "continue"):

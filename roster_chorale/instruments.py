@@ -11,28 +11,43 @@ VOICES = ("S", "A", "T", "B")
 VOICE_NAMES = {"S": "Soprano", "A": "Alto", "T": "Tenor", "B": "Bass"}
 
 
+FAMILIES = ("band", "strings", "mallets", "percussion")
+_NAMED_INTERVALS = {24: "P15", 12: "P8", 0: "P1", -12: "P-8", -24: "P-15"}
+
+
 @dataclass(frozen=True)
 class Inst:
     name: str                       # standard name used everywhere
     factory: Callable[[], instrument.Instrument]
-    prefs: tuple[str, ...]          # voices in order of preference
-    clef: str                       # "treble" or "bass"
+    prefs: tuple[str, ...]          # voices in order of preference (empty for timpani/percussion)
+    clef: str                       # "treble", "alto", "bass", "auto" (treble for S/A, bass for T/B) or "percussion"
     low: bool = False               # can carry a real bass line
     full_name: str = ""             # name printed on the part
+    family: str = "band"            # band / strings / mallets / percussion (drives key preferences)
+    role: str = "voice"             # "voice" (plays a chorale line), "timpani" or "percussion"
+    written_octaves: int | None = None  # octave transposition music21 doesn't know (bells read 2 octaves down)
 
     @property
     def part_name(self) -> str:
         return self.full_name or self.name
 
+    @property
+    def pitched_voice(self) -> bool:
+        return self.role == "voice"
+
     def m21(self) -> instrument.Instrument:
         i = self.factory()
         i.partName = self.part_name
         i.partAbbreviation = self.name
+        if self.written_octaves is not None:
+            i.transposition = self.written_interval.reverse()   # written -> sounding, for MuseScore
         return i
 
     @property
     def written_interval(self) -> interval.Interval:
         """Interval from concert pitch to written pitch (e.g. M2 up for Bb clarinet)."""
+        if self.written_octaves is not None:
+            return interval.Interval(_NAMED_INTERVALS[12 * self.written_octaves])
         t = self.factory().transposition
         return t.reverse() if t is not None else interval.Interval("P1")
 
@@ -40,8 +55,12 @@ class Inst:
     def written_semitones(self) -> int:
         return self.written_interval.semitones
 
-    def m21_clef(self) -> clef.Clef:
-        return clef.TrebleClef() if self.clef == "treble" else clef.BassClef()
+    def m21_clef(self, voice: str = "S") -> clef.Clef:
+        c = self.clef
+        if c == "auto":
+            c = "treble" if voice in ("S", "A") else "bass"
+        return {"treble": clef.TrebleClef, "alto": clef.AltoClef, "bass": clef.BassClef,
+                "percussion": clef.PercussionClef}[c]()
 
 
 def _euph() -> instrument.Instrument:
@@ -51,6 +70,7 @@ def _euph() -> instrument.Instrument:
 
 
 INSTRUMENTS: dict[str, Inst] = {i.name: i for i in [
+    # woodwinds and brass
     Inst("Flute", instrument.Flute, ("S", "A"), "treble"),
     Inst("Oboe", instrument.Oboe, ("S", "A"), "treble"),
     Inst("Clarinet", instrument.Clarinet, ("S", "A", "T"), "treble", full_name="Clarinet in Bb"),
@@ -64,6 +84,20 @@ INSTRUMENTS: dict[str, Inst] = {i.name: i for i in [
     Inst("Trombone", instrument.Trombone, ("T", "B"), "bass", low=True),
     Inst("Euphonium", _euph, ("T", "B"), "bass", low=True),
     Inst("Tuba", instrument.Tuba, ("B",), "bass", low=True),
+    # percussion
+    Inst("Timpani", instrument.Timpani, (), "bass", family="percussion", role="timpani"),
+    Inst("Bells", instrument.Glockenspiel, ("S",), "treble", family="mallets", written_octaves=-2,
+         full_name="Bells (Glockenspiel)"),
+    Inst("Xylophone", instrument.Xylophone, ("S", "A"), "treble", family="mallets", written_octaves=-1),
+    Inst("Marimba", instrument.Marimba, ("A", "T", "S", "B"), "auto", family="mallets"),
+    Inst("Vibraphone", instrument.Vibraphone, ("S", "A"), "treble", family="mallets"),
+    Inst("Percussion", instrument.Percussion, (), "percussion", family="percussion", role="percussion",
+         full_name="Percussion (B.D., Sus. Cym.)"),
+    # strings
+    Inst("Violin", instrument.Violin, ("S", "A"), "treble", family="strings"),
+    Inst("Viola", instrument.Viola, ("A", "T"), "alto", family="strings"),
+    Inst("Cello", instrument.Violoncello, ("B", "T"), "bass", low=True, family="strings"),
+    Inst("Double Bass", instrument.Contrabass, ("B",), "bass", low=True, family="strings", written_octaves=1),
 ]}
 
 # Score order for display.
@@ -95,11 +129,51 @@ _EXACT = {
     "euph": "Euphonium", "euphonium": "Euphonium", "baritone": "Euphonium",
     "baritone horn": "Euphonium", "bar": "Euphonium", "bh": "Euphonium", "bc baritone": "Euphonium",
     "tba": "Tuba", "tu": "Tuba", "tuba": "Tuba", "sousaphone": "Tuba", "sousa": "Tuba",
+    # strings
+    "vn": "Violin", "vln": "Violin", "vl": "Violin", "vi": "Violin", "violin": "Violin", "fiddle": "Violin",
+    "va": "Viola", "vla": "Viola", "viola": "Viola",
+    "vc": "Cello", "vlc": "Cello", "cello": "Cello", "violoncello": "Cello", "vcl": "Cello",
+    "db": "Double Bass", "cb": "Double Bass", "sb": "Double Bass", "bass": "Double Bass", "double bass": "Double Bass",
+    "string bass": "Double Bass", "upright bass": "Double Bass", "contrabass": "Double Bass", "kb": "Double Bass",
+    "electric bass": "Double Bass", "bass guitar": "Double Bass", "upright": "Double Bass",
+    # percussion
+    "timp": "Timpani", "timps": "Timpani", "timpani": "Timpani", "tympani": "Timpani", "kettle drums": "Timpani",
+    "bells": "Bells", "bell": "Bells", "glock": "Bells", "glockenspiel": "Bells", "orchestra bells": "Bells",
+    "mallets": "Bells", "mallet": "Bells", "mallet percussion": "Bells", "keyboard percussion": "Bells",
+    "chimes": "Bells", "xylo": "Xylophone", "xylophone": "Xylophone", "xyl": "Xylophone",
+    "marimba": "Marimba", "mar": "Marimba", "mrb": "Marimba",
+    "vibes": "Vibraphone", "vibraphone": "Vibraphone", "vib": "Vibraphone",
+    "perc": "Percussion", "percussion": "Percussion", "drums": "Percussion", "drum": "Percussion",
+    "snare": "Percussion", "snare drum": "Percussion", "sd": "Percussion", "bass drum": "Percussion",
+    "bd": "Percussion", "cymbals": "Percussion", "cymbal": "Percussion", "crash cymbals": "Percussion",
+    "sus cym": "Percussion", "suspended cymbal": "Percussion", "triangle": "Percussion", "tri": "Percussion",
+    "drum set": "Percussion", "drumset": "Percussion", "drum kit": "Percussion", "kit": "Percussion",
+    "aux": "Percussion", "aux perc": "Percussion", "auxiliary percussion": "Percussion",
+    "tambourine": "Percussion", "battery": "Percussion", "battery percussion": "Percussion",
 }
 
 # (required substrings, standard name) checked in order; first match wins.
 _RULES: list[tuple[tuple[str, ...], str]] = [
     (("bass", "clar"), "Bass Clarinet"),
+    (("bass", "drum"), "Percussion"),
+    (("timp",), "Timpani"),
+    (("tymp",), "Timpani"),
+    (("glock",), "Bells"),
+    (("xylo",), "Xylophone"),
+    (("marimb",), "Marimba"),
+    (("vibra",), "Vibraphone"),
+    (("mallet",), "Bells"),
+    (("snare",), "Percussion"),
+    (("cymb",), "Percussion"),
+    (("perc",), "Percussion"),
+    (("drum",), "Percussion"),
+    (("triang",), "Percussion"),
+    (("viola",), "Viola"),
+    (("violin",), "Violin"),
+    (("cello",), "Cello"),
+    (("double", "bass"), "Double Bass"),
+    (("string", "bass"), "Double Bass"),
+    (("contrab",), "Double Bass"),
     (("bari", "sax"), "Bari Sax"),
     (("baritone", "sax"), "Bari Sax"),
     (("alto", "sax"), "Alto Sax"),

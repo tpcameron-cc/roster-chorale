@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Roster Chorale</title>
-<meta name="description" content="Turn any Bach chorale into printable band parts for the band you actually have, at the grade you pick.">
+<meta name="description" content="Turn any Bach chorale into printable band or orchestra parts for the players you actually have, at the grade you pick.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
@@ -13,21 +13,21 @@
   --bg: #f6f2ea; --panel: #fffdf8; --ink: #1f1b16; --muted: #6b6257; --line: #e3dccf;
   --accent: #7a2e1f; --accent-ink: #fff; --accent-soft: #f3e3dc; --good: #2f6b3a; --good-soft: #e3f0e4;
   --bad: #b3261e; --bad-soft: #fbe4e1; --chip: #efe8dc; --focus: #c9692f;
-  --S: #8a3b2a; --A: #a8742a; --T: #3f6e5a; --B: #34507a;
+  --S: #8a3b2a; --A: #a8742a; --T: #3f6e5a; --B: #34507a; --P: #6a4a8c;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #171411; --panel: #211d19; --ink: #f1ebe2; --muted: #b0a597; --line: #3a332c;
     --accent: #e2a07a; --accent-ink: #1b1410; --accent-soft: #3a2a22; --good: #8fcb98; --good-soft: #1f3324;
     --bad: #ff8a80; --bad-soft: #3d1f1c; --chip: #2d2721; --focus: #e2a07a;
-    --S: #e59a86; --A: #e2bd7d; --T: #8fc7ab; --B: #9ab6e3;
+    --S: #e59a86; --A: #e2bd7d; --T: #8fc7ab; --B: #9ab6e3; --P: #c3a6e6;
   }
 }
 :root[data-theme="dark"] {
   --bg: #171411; --panel: #211d19; --ink: #f1ebe2; --muted: #b0a597; --line: #3a332c;
   --accent: #e2a07a; --accent-ink: #1b1410; --accent-soft: #3a2a22; --good: #8fcb98; --good-soft: #1f3324;
   --bad: #ff8a80; --bad-soft: #3d1f1c; --chip: #2d2721; --focus: #e2a07a;
-  --S: #e59a86; --A: #e2bd7d; --T: #8fc7ab; --B: #9ab6e3;
+  --S: #e59a86; --A: #e2bd7d; --T: #8fc7ab; --B: #9ab6e3; --P: #c3a6e6;
 }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
@@ -111,8 +111,7 @@ table.keys { border-collapse: collapse; width: 100%; font-size: 13px; margin-top
 table.keys th, table.keys td { border-bottom: 1px solid var(--line); padding: 5px 8px; text-align: left; }
 table.keys td.n, table.keys th.n { text-align: right; font-variant-numeric: tabular-nums; }
 table.keys tr.win td { font-weight: 600; }
-.voices { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 10px; }
-@media (max-width: 700px) { .voices { grid-template-columns: repeat(2, 1fr); } }
+.voices { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 10px; }
 .voice { border-radius: 12px; border: 1px solid var(--line); padding: 10px 12px; border-top: 4px solid var(--c); }
 .voice h3 { font-size: 16px; color: var(--c); }
 .voice ul { list-style: none; margin: 6px 0 0; padding: 0; }
@@ -161,14 +160,14 @@ footer { color: var(--muted); font-size: 13px; padding: 10px 0 40px; }
 <div class="wrap">
   <header class="top">
     <h1>Roster Chorale</h1>
-    <p>Turn any Bach chorale into band parts for the band you actually have: voiced for your roster, in a key that keeps everyone in range, at the grade you pick.</p>
+    <p>Turn any Bach chorale into parts for the band or orchestra you actually have: winds, brass, strings, mallets and percussion, voiced for your roster, in a key that keeps everyone in range, at the grade you pick.</p>
     <div class="status" id="status"><span class="dot warm"></span><span>Warming up the arranger…</span></div>
   </header>
 
   <!-- STEP 1: ROSTER -->
   <section class="card" id="roster-card">
     <h2><span class="step">Step 1</span> Your roster</h2>
-    <p class="sub">One row per student (any column order) or instrument-and-count pairs. Messy names like “Bb Clar”, “Alto Sax 1” or “Tbn” are fine. Nothing is stored on the server.</p>
+    <p class="sub">Upload a class list, paste rows from a spreadsheet, or just type what you have. Messy names like “Bb Clar”, “Vln 2”, “Tbn” or “Snare” are fine. Nothing is stored on the server.</p>
     <div class="grid2">
       <div>
         <label class="lbl">Upload a spreadsheet</label>
@@ -179,9 +178,10 @@ footer { color: var(--muted); font-size: 13px; padding: 10px 0 40px; }
         <p class="small muted">No roster handy? <a href="/samples/lopsided-band.xlsx" download>Download the sample lopsided band</a>.</p>
       </div>
       <div>
-        <label class="lbl" for="paste">…or paste rows from Excel or Google Sheets</label>
-        <textarea id="paste" placeholder="Name&#9;Instrument&#10;Ava&#9;Flute&#10;Liam&#9;Bb Clar&#10;Sam&#9;Bari"></textarea>
-        <div class="row" style="margin-top:8px"><button id="paste-btn">Read pasted rows</button></div>
+        <label class="lbl" for="paste">…or type your instrumentation (or paste rows from Excel / Google Sheets)</label>
+        <textarea id="paste" placeholder="Flute 9, Clarinet 5, Trumpet 4, Tuba 1&#10;9 flutes - 4 trumpets - 2 snare drums&#10;Violin: 12&#10;Viola x4&#10;Cello 5, Bass 2"></textarea>
+        <div class="row" style="margin-top:8px"><button id="paste-btn">Read roster</button>
+          <span class="small muted">Commas, dashes, colons, “x” or one per line all work.</span></div>
       </div>
     </div>
     <div id="roster-err" class="err hidden" role="alert"></div>
@@ -220,7 +220,7 @@ footer { color: var(--muted); font-size: 13px; padding: 10px 0 40px; }
           <label><input type="radio" name="grade" value="2"><span>2</span></label>
           <label><input type="radio" name="grade" value="3"><span>3</span></label>
         </div>
-        <p class="small muted" style="margin-top:10px">The grade sets each instrument's range, which concert keys are allowed, and how much the rhythm is simplified (grade ½–1: eighth notes merged into quarters; grade 2: sixteenths into eighths; grade 3: as written).</p>
+        <p class="small muted" style="margin-top:10px">The grade sets each instrument's range, which concert keys are allowed (flat keys for winds, sharp keys for strings; mixed groups get the best compromise), and how much the rhythm is simplified (grade ½–1: eighth notes merged into quarters; grade 2: sixteenths into eighths; grade 3: as written).</p>
       </div>
     </div>
     <div class="arrange-row">
@@ -278,7 +278,8 @@ footer { color: var(--muted); font-size: 13px; padding: 10px 0 40px; }
 "use strict";
 const $ = (s) => document.querySelector(s);
 const VOICE = { S: "Soprano", A: "Alto", T: "Tenor", B: "Bass" };
-const VKEY = { Soprano: "S", Alto: "A", Tenor: "T", Bass: "B" };
+const VKEY = { Soprano: "S", Alto: "A", Tenor: "T", Bass: "B", Percussion: "P" };
+const lineLabel = (a) => a.voice === "P" ? "Percussion" : `${a.voice_name} line`;
 const LS = {
   get(k, d) { try { const v = localStorage.getItem("rc." + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem("rc." + k, JSON.stringify(v)); } catch {} },
@@ -483,7 +484,7 @@ function renderResult(r) {
     a.rests.forEach((s) => items.push(`<li>${esc(s.text)}</li>`));
     a.problems.forEach((p) => items.push(`<li class="prob">Out of range: ${esc(p.text)}</li>`));
     return `<div class="fit-inst"><div class="hd"><strong>${esc(a.part_name)} <span class="muted" style="font-weight:400">× ${a.players}</span></strong>
-      <span><span class="tag v" style="--c:var(--${a.voice})">${esc(a.voice_name)} line</span> <span class="tag">range ${esc(a.range)}</span></span></div><ul>${items.join("")}</ul></div>`;
+      <span><span class="tag v" style="--c:var(--${a.voice})">${esc(lineLabel(a))}</span> <span class="tag">${a.voice === "P" && a.range === "unpitched" ? "unpitched" : "range " + esc(a.range)}</span></span></div><ul>${items.join("")}</ul></div>`;
   }).join("");
   const rh = r.rhythm;
   $("#rhythm-sum").textContent = rh.length ? `Rhythm simplifications for ${r.grade.label} (${rh.length})` : `Rhythm: played as written at ${r.grade.label}`;
@@ -519,7 +520,7 @@ async function renderParts(r) {
       <div class="page-head">
         <div class="t">${esc(title)}</div><div class="pn">${esc(p.part_name)}</div>
         <div class="m">J. S. Bach · BWV ${esc(c.bwv)} · Concert ${esc(r.key.concert)}</div>
-        <div class="m r">${esc(r.grade.label)} · ${esc(a.voice_name)} line</div>
+        <div class="m r">${esc(r.grade.label)} · ${esc(lineLabel(a))}</div>
       </div>
       <div class="svg"><div class="rendering">Engraving…</div></div>
       <div class="dl"><a href="#" data-i="${i}">Download this part (MusicXML)</a></div>

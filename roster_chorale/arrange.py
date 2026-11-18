@@ -21,6 +21,7 @@ from music21 import expressions, interval, key, metadata, meter, note, pitch, st
 from music21.musicxml.m21ToXml import GeneralObjectExporter
 
 from . import chorale as chmod
+from . import percussion as perc
 from .chorale import DATA, Chorale, key_name, pitch_label
 from .instruments import INSTRUMENTS, ORDER, VOICE_NAMES, VOICES, Inst
 
@@ -28,7 +29,7 @@ COST_RESIDUAL = 100     # per note still out of range
 COST_TACET = 15         # a part rests for a phrase it can't play in any octave (another part covers it)
 COST_PRE = 2            # per note that needed a phrase shift
 COST_SHIFT = 4          # per phrase shift
-COST_PREF = (0, 3, 6)   # voice preference rank; anything else costs COST_UNLISTED
+COST_PREF = (0, 3, 6, 9)  # voice preference rank; anything else costs COST_UNLISTED
 COST_UNLISTED = 20
 COST_BELOW_BASS = 500   # an upper voice octave-displaced so it sounds below the bass line (wrong harmony)
 BELOW_BASS_MARGIN = 5   # semitones an upper voice's average must stay above the bass line's average
@@ -37,7 +38,10 @@ COST_TWO_OCT = 2        # whole part moved two octaves
 COST_THIN = 4           # per player a voice is short of BALANCE_SHARE of the band
 BALANCE_SHARE = 0.15
 COST_KEY_MOVE = 0.25    # per semitone away from Bach's key (tie-break)
+COST_KEY_FAMILY = 3     # per player whose family (band / strings) doesn't list the key at this grade
 OCTAVE_TRIES = (0, -1, 1, -2, 2)
+INVERSION_WEIGHT = 5    # in key ranking, a part sounding below the bass counts as this many out-of-range notes
+COVER_CANDIDATES = 6    # per voice, how many instruments to try as that voice's guaranteed player
 
 
 class ArrangeError(ValueError):
@@ -250,10 +254,17 @@ def assign_voices(cost: dict[tuple[str, str], float], fits: dict[tuple[str, str]
         t = sum(cost[i, v] for i, v in a.items()) + bass_penalty(a) + phrase_plan(a, fits, n_phrases)[0]
         return t + (balance_cost(a, counts) if balance else 0.0)
 
+    # For each voice, the instruments that lose least by being moved onto it (all of them for
+    # small rosters). Trying these as each voice's guaranteed player keeps big orchestras fast.
+    regret = {(i, v): seed[i, v] - seed[i, cheapest[i]] for i in insts for v in VOICES}
+    cands = {v: sorted(insts, key=lambda i: (regret[i, v], insts.index(i)))[:COVER_CANDIDATES] for v in VOICES}
+
     best_assign, best_total = None, float("inf")
     cover_sets = [req] if n != 3 else [["S", "B", "A"], ["S", "B", "T"]]
     for voices in cover_sets:
-        for chosen in itertools.permutations(insts, len(voices)):
+        for chosen in itertools.product(*(cands[v] for v in voices)):
+            if len(set(chosen)) < len(chosen):
+                continue
             assign = {i: cheapest[i] for i in insts}
             assign.update(dict(zip(chosen, voices)))
             if n <= 3 and len(set(assign.values())) < len(assign):
@@ -301,6 +312,12 @@ class KeyResult:
     assign: dict[str, str]
     fits: dict[str, Fit]     # per instrument, for its assigned voice (tacet filled in)
     total: float
+    off_list: dict[str, int] = field(default_factory=dict)  # family -> players for whom the key isn't on their grade list
+    inverted: int = 0        # parts pushed below the bass line (wrong harmony); ranks like 5 notes out of range
+
+    @property
+    def rank(self) -> tuple[float, float]:
+        return (self.residual + INVERSION_WEIGHT * self.inverted, self.total)
 
     @property
     def name(self) -> str:
@@ -323,19 +340,46 @@ class KeyResult:
         return sum(len(f.tacet) for f in self.fits.values())
 
 
+def key_lists(cfg: dict, mode: str) -> dict[str, list[str]]:
+    return {"band": [pitch.Pitch(t).name for t in cfg["keys"][mode]],
+            "strings": [pitch.Pitch(t).name for t in cfg.get("string_keys", cfg["keys"])[mode]]}
+
+
+def candidate_keys(counts: dict[str, int], cfg: dict, mode: str) -> list[tuple[str, dict[str, int]]]:
+    """Keys to try, each with the players (by family) for whom it's off their grade's key list.
+
+    Winds use the band list, strings the string list; mallets and percussion don't mind.
+    A mixed band-and-strings roster tries both lists and the majority usually wins."""
+    lists = key_lists(cfg, mode)
+    players = {fam: sum(n for i, n in counts.items() if INSTRUMENTS[i].family == fam) for fam in lists}
+    present = [fam for fam in lists if players[fam]] or ["band"]
+    out: list[tuple[str, dict[str, int]]] = []
+    seen: set[int] = set()
+    for fam in present:
+        for t in lists[fam]:
+            pc = int(pitch.Pitch(t).ps) % 12
+            if pc in seen:
+                continue
+            seen.add(pc)
+            off = {f: players[f] for f in present
+                   if players[f] and pc not in {int(pitch.Pitch(x).ps) % 12 for x in lists[f]}}
+            out.append((t, off))
+    return out
+
+
 def search_keys(ch: Chorale, counts: dict[str, int], cfg: dict) -> list[KeyResult]:
     mode = ch.key.mode if ch.key.mode in ("major", "minor") else "major"
-    allowed = [pitch.Pitch(t).name for t in cfg["keys"][mode]]
     rng = ranges_midi(cfg)
     notes = {v: voice_notes(ch, v) for v in VOICES}
     n_phrases = max((n.phrase for v in VOICES for n in notes[v]), default=0) + 1
     orig = ch.key.tonic.name
     mean = {v: sum(n.midi for n in notes[v]) / max(len(notes[v]), 1) for v in VOICES}
     results = []
-    for spelled in allowed:
+    for spelled, off in candidate_keys(counts, cfg, mode):
         semis = key_interval(orig, spelled).semitones
         fits: dict[tuple[str, str], Fit] = {}
         cost: dict[tuple[str, str], float] = {}
+        below: set[tuple[str, str]] = set()
         for name in counts:
             inst = INSTRUMENTS[name]
             lo, hi = rng[name]
@@ -345,6 +389,7 @@ def search_keys(ch: Chorale, counts: dict[str, int], cfg: dict) -> list[KeyResul
                 cost[name, v] = f.cost + pref_cost(inst, v)
                 if v != "B" and mean[v] + 12 * f.octave < mean["B"] + BELOW_BASS_MARGIN:
                     cost[name, v] += COST_BELOW_BASS
+                    below.add((name, v))
         real_bass = {name: fits[name, "B"].octave <= 0 for name in counts}
         assign, total = assign_voices(cost, fits, counts, n_phrases, real_bass)
         _, tacet, _ = phrase_plan(assign, fits, n_phrases)
@@ -352,9 +397,10 @@ def search_keys(ch: Chorale, counts: dict[str, int], cfg: dict) -> list[KeyResul
         for i, v in assign.items():
             f = fits[i, v]
             chosen[i] = Fit(f.octave, f.phrase_shifts, f.pre_out, f.pre_above, f.pre_below, f.bad, tacet[i])
-        total += COST_KEY_MOVE * abs(semis)
-        results.append(KeyResult(spelled, mode, semis, assign, chosen, total))
-    results.sort(key=lambda r: (r.residual, r.total))
+        total += COST_KEY_MOVE * abs(semis) + COST_KEY_FAMILY * sum(off.values())
+        results.append(KeyResult(spelled, mode, semis, assign, chosen, total, off,
+                                 sum(1 for iv in assign.items() if iv in below)))
+    results.sort(key=lambda r: r.rank)
     return results
 
 
@@ -449,7 +495,7 @@ def build_part(ch: Chorale, v: str, inst: Inst, kr: KeyResult, f: Fit, grade_lab
     for idx, b in enumerate(bars):
         m = stream.Measure(number=b.number)
         if idx == 0:
-            m.insert(0, inst.m21_clef())
+            m.insert(0, inst.m21_clef(v))
             m.insert(0, ks)
         if b.ts:
             m.insert(0, meter.TimeSignature(b.ts))
@@ -544,6 +590,11 @@ def arrange(chorale_id: str, counts: dict[str, int], grade: str | float, with_pa
     if meta is None:
         raise ArrangeError(f"No chorale matches {chorale_id!r}.")
     counts = {k: counts[k] for k in ORDER if k in counts}
+    extras = {k: n for k, n in counts.items() if not INSTRUMENTS[k].pitched_voice}
+    all_counts, counts = counts, {k: n for k, n in counts.items() if INSTRUMENTS[k].pitched_voice}
+    if not counts:
+        raise ArrangeError("Timpani and percussion need at least one instrument playing the chorale itself. "
+                           "Add winds, brass, strings or mallets.")
 
     original = chmod.load(meta["id"])
     ch, rhythm = chmod.simplify(original, cfg["rhythm"])
@@ -561,8 +612,18 @@ def arrange(chorale_id: str, counts: dict[str, int], grade: str | float, with_pa
                         f"{'s are' if len(missing) > 1 else ' is'} left out.")
     if "B" in voices_used and not any(INSTRUMENTS[i].low for i, v in best.assign.items() if v == "B"):
         bass_players = [i for i, v in best.assign.items() if v == "B"]
-        warnings.append(f"No low instrument (trombone, euphonium, tuba, bari sax, bass clarinet or bassoon) on the roster: "
+        warnings.append(f"No low instrument (cello, double bass, trombone, euphonium, tuba, bari sax, bass clarinet "
+                        f"or bassoon) on the roster: "
                         f"the bass line is played by {', '.join(bass_players)}, octave-displaced. It will sound thin.")
+    if best.off_list:
+        fam_word = {"band": "wind and brass", "strings": "string"}
+        lists = key_lists(cfg, best.mode)
+        for fam, n in best.off_list.items():
+            other = [f for f in lists if f != fam and f not in best.off_list]
+            warnings.append(f"Concert {best.name} isn't on the {cfg['label']} {fam_word[fam]} key list, so your "
+                            f"{_plural(n, fam_word[fam] + ' player')} read a less familiar key. It was chosen because it suits "
+                            f"the {' and '.join(fam_word[f] for f in other) or 'rest of the'} players and keeps everyone in range."
+                            .replace("players players", "players"))
     if best.residual:
         notes_txt = []
         for name, f in best.fits.items():
@@ -634,11 +695,38 @@ def arrange(chorale_id: str, counts: dict[str, int], grade: str | float, with_pa
                 "musicxml": to_musicxml(sc),
             })
 
+    if extras:
+        concert_key = key.Key(best.tonic, best.mode)
+        for name, n in extras.items():
+            inst = INSTRUMENTS[name]
+            lo, hi = ranges_midi(cfg).get(name, (41, 53))
+            if inst.role == "timpani":
+                rows, text, tuning = perc.timpani_hits(ch, key_iv, best.tonic, str(grade), lo, hi)
+                template, ks_key = "B", concert_key
+                rng_text = f"{pitch_label(cfg['ranges'][name][0])}–{pitch_label(cfg['ranges'][name][1])} (tuning)"
+            else:
+                rows, text = perc.percussion_hits(ch, str(grade))
+                template, ks_key, rng_text = "S", None, "unpitched"
+            assignment.append({
+                "instrument": name, "part_name": inst.part_name, "players": n, "voice": "P",
+                "voice_name": "Percussion", "range": rng_text, "part_octave": 0, "part_octave_text": text,
+                "phrase_shifts": [], "rests": [], "out_before_phrase_shifts": 0, "out_of_range": 0, "problems": [],
+            })
+            if with_parts:
+                sc = perc.write_part(ch, template, rows, inst, best.name, cfg["label"], ks_key)
+                parts.append({
+                    "instrument": name, "part_name": inst.part_name, "voice": "P",
+                    "filename": safe_filename(f"{meta['id']}-{name}") + ".musicxml",
+                    "musicxml": to_musicxml(sc),
+                })
+
     def key_row(r: KeyResult) -> dict:
         return {"key": r.name, "out_before_phrase_shifts": r.pre_out, "phrase_shifts": r.n_shifts,
                 "out_of_range": r.residual, "rests": r.n_tacet, "score": round(r.total, 1), "worst": _worst(r, cfg)}
 
     by_voice = {VOICE_NAMES[v]: [a["instrument"] for a in assignment if a["voice"] == v] for v in VOICES}
+    if extras:
+        by_voice["Percussion"] = list(extras)
     return {
         "chorale": {"id": meta["id"], "bwv": meta["bwv"], "title": meta["title"], "original_key": ch.key_name,
                     "measures": meta["measures"]},

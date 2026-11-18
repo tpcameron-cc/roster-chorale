@@ -21,8 +21,8 @@ def test_roster_upload(sample_xlsx):
     r = client.post("/api/roster", files={"file": (sample_xlsx.name, sample_xlsx.read_bytes())})
     assert r.status_code == 200
     d = r.json()
-    assert d["counts"] == LOPSIDED
-    assert {u["name"] for u in d["unrecognized"]} == {"Percussion", "Piano"}
+    assert d["counts"] == {**LOPSIDED, "Percussion": 2}
+    assert {u["name"] for u in d["unrecognized"]} == {"Piano"}
 
 
 def test_roster_paste():

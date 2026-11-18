@@ -1,5 +1,5 @@
 {
-  "_note": "Starting values: conservative and approximate. Ranges are WRITTEN pitch (what the player reads), inclusive, in music21 spelling (B- = B-flat). Check these against your state's grading guide and edit freely. Key tonics use music21 spelling too.",
+  "_note": "Starting values: conservative and approximate. Ranges are WRITTEN pitch (what the player reads), inclusive, in music21 spelling (B- = B-flat). Bells read two octaves below sounding, xylophone one octave below, double bass one octave above; timpani is the tuning range. 'keys' are the band (wind) keys for the grade, 'string_keys' the string-orchestra keys. Check these against your state's grading guide and edit freely.",
   "grades": {
     "0.5": {
       "label": "Grade 0.5",
@@ -16,9 +16,19 @@
         "Horn": ["G3", "C5"],
         "Trombone": ["B-2", "C4"],
         "Euphonium": ["B-2", "C4"],
-        "Tuba": ["B-1", "C3"]
+        "Tuba": ["B-1", "C3"],
+        "Timpani": ["F2", "F3"],
+        "Bells": ["G3", "C6"],
+        "Xylophone": ["C4", "C6"],
+        "Marimba": ["C3", "C6"],
+        "Vibraphone": ["F3", "F6"],
+        "Violin": ["G3", "B5"],
+        "Viola": ["C3", "E5"],
+        "Cello": ["C2", "D4"],
+        "Double Bass": ["E2", "B3"]
       },
       "keys": {"major": ["B-", "E-", "F", "A-"], "minor": ["G", "C", "F"]},
+      "string_keys": {"major": ["D", "G"], "minor": ["E", "A"]},
       "rhythm": {"grid": 1.0, "drop_bar_ties": true}
     },
     "1": {
@@ -36,9 +46,19 @@
         "Horn": ["G3", "C5"],
         "Trombone": ["B-2", "C4"],
         "Euphonium": ["B-2", "C4"],
-        "Tuba": ["B-1", "C3"]
+        "Tuba": ["B-1", "C3"],
+        "Timpani": ["F2", "F3"],
+        "Bells": ["G3", "C6"],
+        "Xylophone": ["C4", "C6"],
+        "Marimba": ["C3", "C6"],
+        "Vibraphone": ["F3", "F6"],
+        "Violin": ["G3", "B5"],
+        "Viola": ["C3", "E5"],
+        "Cello": ["C2", "D4"],
+        "Double Bass": ["E2", "B3"]
       },
       "keys": {"major": ["B-", "E-", "F", "A-"], "minor": ["G", "C", "F"]},
+      "string_keys": {"major": ["D", "G", "C", "A"], "minor": ["E", "A", "D"]},
       "rhythm": {"grid": 1.0, "drop_bar_ties": true}
     },
     "2": {
@@ -56,9 +76,19 @@
         "Horn": ["F3", "E5"],
         "Trombone": ["F2", "D4"],
         "Euphonium": ["F2", "D4"],
-        "Tuba": ["F1", "D3"]
+        "Tuba": ["F1", "D3"],
+        "Timpani": ["D2", "A3"],
+        "Bells": ["G3", "C6"],
+        "Xylophone": ["F3", "C7"],
+        "Marimba": ["A2", "C7"],
+        "Vibraphone": ["F3", "F6"],
+        "Violin": ["G3", "D6"],
+        "Viola": ["C3", "G5"],
+        "Cello": ["C2", "G4"],
+        "Double Bass": ["E2", "D4"]
       },
       "keys": {"major": ["B-", "E-", "F", "A-", "C", "D-"], "minor": ["G", "C", "F", "B-"]},
+      "string_keys": {"major": ["D", "G", "C", "A", "F", "B-"], "minor": ["E", "A", "D", "B", "G"]},
       "rhythm": {"grid": 0.5, "drop_bar_ties": false}
     },
     "3": {
@@ -76,9 +106,19 @@
         "Horn": ["C3", "F5"],
         "Trombone": ["E2", "F4"],
         "Euphonium": ["E2", "F4"],
-        "Tuba": ["E1", "F3"]
+        "Tuba": ["E1", "F3"],
+        "Timpani": ["D2", "A3"],
+        "Bells": ["G3", "C6"],
+        "Xylophone": ["F3", "C7"],
+        "Marimba": ["A2", "C7"],
+        "Vibraphone": ["F3", "F6"],
+        "Violin": ["G3", "E6"],
+        "Viola": ["C3", "A5"],
+        "Cello": ["C2", "A4"],
+        "Double Bass": ["E2", "G4"]
       },
       "keys": {"major": ["A-", "E-", "B-", "F", "C", "G", "D"], "minor": ["F", "C", "G", "D", "A", "E", "B"]},
+      "string_keys": {"major": ["B-", "F", "C", "G", "D", "A", "E"], "minor": ["G", "D", "A", "E", "B", "F#", "C#"]},
       "rhythm": null
     }
   }

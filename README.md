@@ -1,10 +1,10 @@
 # Roster Chorale
 
-Turn any Bach chorale into printable band parts scored for the band you actually have, at the grade you pick, in the concert key that keeps everyone in range.
+Turn any Bach chorale into printable parts for the band or orchestra you actually have (winds, brass, strings, mallets, timpani and percussion) at the grade you pick, in the concert key that keeps everyone in range.
 
 **Live:** https://roster-chorale.vercel.app
 
-1. Upload your roster (`.xlsx` / `.csv`) or paste rows from Excel or Google Sheets. Messy names like “Bb Clar”, “Alto Sax 1”, “Bari” and “Tbn” are cleaned up. Anything unrecognised is listed with a dropdown so you can classify it.
+1. Upload your roster (`.xlsx` / `.csv`), paste rows from Excel or Google Sheets, or just type it: `Flute 9, Clarinet 5, Tuba 1`, `9 flutes - 4 trumpets - 2 snare drums`, `Violin: 12`, `Viola x4`, or one per line all work. Messy names like “Bb Clar”, “Vln 2”, “Bari”, “Tbn” and “Snare” are cleaned up. Anything unrecognised (piano, harp, guitar…) is listed with a dropdown so you can classify it.
 2. Pick a chorale (search by BWV number or title, or **Surprise me**) and a target grade (½, 1, 2 or 3).
 3. **Arrange** → the chosen concert key and why the runner-up lost, who plays which voice, a fit report, and every part engraved in the browser, transposed for its instrument.
 4. **Print all parts** (one part per page; choose “Save as PDF” in the print dialog) or **Download MusicXML (.zip)** to open in MuseScore.
@@ -25,15 +25,29 @@ Voices are then assigned so that every voice is covered, the bass line goes to l
 
 If no allowed key fits everyone, the page says so in red, picks the least-bad key, and lists every problem note by measure.
 
+### Instruments
+
+| Family | Instruments | What they play |
+|---|---|---|
+| Woodwinds & brass | flute, oboe, Bb clarinet, bass clarinet, bassoon, alto/tenor/bari sax, Bb trumpet, F horn, trombone, euphonium, tuba | a chorale line, transposed |
+| Strings | violin, viola (alto clef), cello, double bass (reads an octave up) | a chorale line |
+| Mallets | bells (read two octaves down), xylophone (one octave down), marimba, vibraphone | a chorale line, usually doubling the melody |
+| Timpani | two drums tuned to the tonic and dominant | the opening note and each phrase's cadence; from grade 2 also tonic/dominant downbeats and rolls on fermatas |
+| Percussion | snare, bass drum, cymbals, triangle, drum set… (one shared part) | bass drum on each phrase's first downbeat, suspended cymbal on every fermata (rolled from grade 2) |
+
+Bach wrote no percussion, so the timpani and percussion parts frame the phrases rather than adding rhythm. Timpani and percussion need at least one instrument playing the chorale itself.
+
+**Keys for mixed groups.** Winds use the band key list for the grade (flat keys); strings use the string list (sharp keys). A mixed orchestra tries both, costs each player a little when the key is off their family's list, and says so when the chosen key is unfamiliar for one section.
+
 ### Grades (`data/grades.json`)
 
 The grade table is plain JSON you can edit. **These are starting values: conservative and approximate. Check them against your state's grading guide.** Each grade sets:
 
 | | Ranges | Concert keys | Rhythm |
 |---|---|---|---|
-| ½ and 1 | narrow (e.g. trumpet Bb3–C5, tuba Bb1–C3, written) | Bb, Eb, F, Ab major; G, C, F minor | eighth-note pairs merged into a quarter that keeps the on-beat pitch; ties across barlines removed; fermatas kept |
-| 2 | wider | adds C, Db major and Bb minor | sixteenths simplified to eighths |
-| 3 | wider still | up to 4 flats or 2 sharps | as written |
+| ½ and 1 | narrow (e.g. trumpet Bb3–C5, tuba Bb1–C3, violin G3–B5, written) | band: Bb, Eb, F, Ab major; G, C, F minor. Strings (grade 1): D, G, C, A major; E, A, D minor | eighth-note pairs merged into a quarter that keeps the on-beat pitch; ties across barlines removed; fermatas kept |
+| 2 | wider | band adds C, Db major and Bb minor; strings add F, Bb major and B, G minor | sixteenths simplified to eighths |
+| 3 | wider still | band: up to 4 flats or 2 sharps; strings: up to 2 flats or 4 sharps | as written |
 
 Ranges are written pitch, inclusive, in music21 spelling (`B-4` = B♭4). The spec started grade-1 tuba at Bb1–Bb2; it is now Bb1–C3. Tuba and bass clarinet are still the most common reason a grade-1 arrangement ends up “least-bad” (usually one or two notes), so widen those ranges if your players can manage it.
 
@@ -76,7 +90,8 @@ app.py                     FastAPI: /api/roster, /api/chorales, /api/arrange, /a
 public/index.html          the whole front end (vanilla JS + Verovio 6.4.1 for engraving)
 roster_chorale/
   instruments.py           standard instruments, transpositions, voice preferences, name aliases
-  roster.py                .xlsx / .csv / pasted-text roster parsing and counting
+  roster.py                .xlsx / .csv / pasted rows / typed instrumentation parsing and counting
+  percussion.py            timpani and percussion parts
   chorale.py               corpus loading, phrases (fermatas), rhythm simplification
   arrange.py               key search, voice assignment, octave fitting, MusicXML parts, fit report
 data/grades.json           ranges, keys and rhythm rules per grade (edit me)
@@ -88,4 +103,4 @@ samples/lopsided-band.xlsx a realistic messy roster (invented first names)
 
 - Chorales come from the [music21](https://www.music21.org/) corpus: the 371 Riemenschneider chorales plus other plain chorale files (such as BWV 66.6), keeping only the 355 with exactly four parts named Soprano/Alto/Tenor/Bass. Where music21 has no title for a chorale, it is listed as “Chorale from BWV …”.
 - Repeat signs in the source are not reproduced: repeated sections print once.
-- One part per instrument (no Clarinet 1/2). Euphonium is bass clef. Mallets and percussion are not included.
+- One part per instrument (no Clarinet 1/2, no Violin 1/2). Euphonium is bass clef. Piano, harp and guitar aren't parts yet; classify them as the closest instrument (marimba works well for piano).

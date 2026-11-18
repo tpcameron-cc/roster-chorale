@@ -189,8 +189,124 @@ def parse_rows(rows: list[list[str]]) -> Roster:
     return roster
 
 
+# ---------------------------------------------------------------------------
+# Typed instrumentation: "Flute 9, Clarinet 5", "9 flutes - 5 clarinets", "Tuba x1", "Horn: 2"
+# ---------------------------------------------------------------------------
+_SEP = r"[-–—:=*×.()#\[\]]"
+_LEAD = re.compile(rf"^\s*(?:{_SEP}|x(?=\s|$)|•)+\s*", re.I)
+_TRAIL = re.compile(rf"\s*(?:{_SEP}|(?<=\s)x)+\s*$", re.I)
+_FILLER = re.compile(r"\b(players?|students?|kids?|people|musicians?|of|on)\b", re.I)
+
+
+def _clean_name(s: str) -> str:
+    s = _FILLER.sub(" ", s)
+    prev = None
+    while prev != s:
+        prev = s
+        s = _TRAIL.sub("", _LEAD.sub("", s)).strip()
+    return re.sub(r"\s+", " ", s)
+
+
+def _chunks(text: str) -> list[str]:
+    out = []
+    for line in text.replace("\r", "\n").split("\n"):
+        for c in re.split(r"[,;|&+]|\band\b", line, flags=re.I):
+            c = c.strip()
+            if not c:
+                continue
+            if not re.search(r"\d", c):
+                # "Flute - Clarinet - Trumpet" or "Flute/Oboe": no counts, so dashes and slashes separate names
+                out += [x.strip() for x in re.split(r"\s+[-–—]\s+|/", c) if x.strip()]
+            else:
+                out.append(c)
+    return out
+
+
+def parse_free(text: str) -> tuple[Roster, bool]:
+    """Read typed instrumentation. Returns the roster and whether the text clearly gave
+    counts (a number before the name, a separator like '-', ':' or 'x', a plural, or 5+)."""
+    roster = Roster(layout="typed", instrument_column="typed list")
+    strong = False
+    for chunk in _chunks(text):
+        segs = [s for s in re.split(r"(\d+)", chunk) if s.strip()]
+        number_first = segs[0].strip().isdigit()
+        pairs: list[list] = []          # [name, count, strong]
+        if number_first:
+            i = 0
+            while i < len(segs):
+                if segs[i].strip().isdigit():
+                    name = segs[i + 1] if i + 1 < len(segs) and not segs[i + 1].strip().isdigit() else ""
+                    pairs.append([name, int(segs[i]), True, True])
+                    i += 2 if name else 1
+                else:
+                    pairs.append([segs[i], 1, False, False])
+                    i += 1
+        else:
+            i = 0
+            while i < len(segs):
+                name = segs[i]
+                if i + 1 < len(segs) and segs[i + 1].strip().isdigit():
+                    n = int(segs[i + 1])
+                    sep = bool(re.search(rf"(?:{_SEP}|\sx)\s*$", name, re.I))
+                    pairs.append([name, n, sep or n >= 5, True])
+                    i += 2
+                else:
+                    pairs.append([name, 1, False, False])
+                    i += 1
+        merged: list[list] = []
+        for name, n, st, has_num in pairs:
+            clean = _clean_name(name)
+            if not clean:
+                if merged and has_num:      # "Alto Sax 1 - 3": the second number is the count
+                    merged[-1][1], merged[-1][2] = n, True
+                continue
+            merged.append([clean, n, st])
+        for name, n, st in merged:
+            if n <= 0:
+                continue
+            if name.lower().endswith("s") and canonical(name[:-1]) and n > 1:
+                st = True                    # "3 flutes" / "Flutes 3"
+            strong |= st
+            std = canonical(name)
+            if std:
+                roster.counts[std] = roster.counts.get(std, 0) + n
+            else:
+                roster.unrecognized[name] = roster.unrecognized.get(name, 0) + n
+    return roster, strong
+
+
 def parse_text(text: str) -> Roster:
-    return parse_rows(rows_from_text(text))
+    """Pasted spreadsheet rows OR typed instrumentation; picks whichever reading fits better."""
+    if not text or not text.strip():
+        raise RosterError("The roster is empty. Upload a spreadsheet, paste rows, or type something like \"Flute 9, Clarinet 5\".")
+    rows_err = None
+    try:
+        rows = parse_rows(rows_from_text(text))
+    except RosterError as e:
+        rows, rows_err = None, e
+    if "\t" in text:                           # copied straight from Excel / Google Sheets
+        if rows is not None:
+            return rows
+        raise rows_err
+    free, strong = parse_free(text)
+    if not free.counts and not free.unrecognized:
+        if rows is not None:
+            return rows
+        raise rows_err or RosterError("No players found in the roster.")
+    if rows is None:
+        if not free.counts:
+            raise RosterError("Couldn't recognise any instruments. Try something like \"Flute 9, Clarinet 5, Tuba 1\".")
+        return free
+    header = rows.instrument_column and not rows.instrument_column.startswith("column ")
+    if header:
+        return rows
+    if strong:                      # "Flute 9", "9 flutes", "Tuba x1", "Horn: 2"
+        return free
+    if len(free.counts) > len(rows.counts):   # "Flute, Flute, Clarinet, Tuba" on one line
+        return free
+    if len(free.unrecognized) < len(rows.unrecognized):
+        return free
+    return rows
 
 
 def parse_upload(filename: str, data: bytes) -> Roster:
