@@ -14,6 +14,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("roster", help=".xlsx or .csv roster (one row per student, or instrument + count)")
     ap.add_argument("--chorale", default="bwv66.6", help="chorale id or BWV number, e.g. bwv66.6 or 66.6")
     ap.add_argument("--grade", default="1", choices=["0.5", "1", "2", "3"])
+    ap.add_argument("--parts", default="single", choices=["single", "multiple"],
+                    help="single: one part per instrument; multiple: split sections (Flute 1, Flute 2...)")
     ap.add_argument("--out", default="out", help="output folder")
     a = ap.parse_args(argv)
 
@@ -23,7 +25,7 @@ def main(argv: list[str] | None = None) -> int:
     if r.unrecognized:
         print("Unrecognised (left out):", ", ".join(f"{k} x{v}" for k, v in r.unrecognized.items()))
 
-    res = arrange(a.chorale, r.ordered_counts(), a.grade)
+    res = arrange(a.chorale, r.ordered_counts(), a.grade, parts_mode=a.parts)
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     for p in res["parts"]:

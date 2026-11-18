@@ -53,3 +53,13 @@ def test_arrange_and_zip():
 def test_arrange_bad_chorale():
     r = client.post("/api/arrange", json={"roster": LOPSIDED, "chorale": "bwv9999", "grade": "1"})
     assert r.status_code == 400
+
+
+def test_arrange_split_sections_via_api():
+    body = {"roster": {"Flute": 6, "Trumpet": 4, "Trombone": 2, "Tuba": 1}, "chorale": "bwv66.6", "grade": "2",
+            "parts": "multiple"}
+    d = client.post("/api/arrange", json=body).json()
+    names = [p["part_name"] for p in d["parts"]]
+    assert "Flute 1" in names and "Flute 2" in names and "Trumpet 1 in Bb" in names and "Trombone 2" in names
+    z = client.post("/api/zip", json=body)
+    assert len(zipfile.ZipFile(io.BytesIO(z.content)).namelist()) == len(d["parts"]) + 1

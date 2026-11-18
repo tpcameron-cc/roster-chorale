@@ -65,18 +65,19 @@ class ArrangeBody(BaseModel):
     roster: dict[str, int] = Field(..., description="standard instrument name -> number of players")
     chorale: str = Field(..., description="chorale id such as bwv66.6")
     grade: str = "1"
+    parts: str = Field("single", description='"single" = one part per instrument, "multiple" = split sections')
 
 
 @app.post("/api/arrange")
 def do_arrange(body: ArrangeBody) -> dict:
-    res = arrange(body.chorale, body.roster, body.grade)
+    res = arrange(body.chorale, body.roster, body.grade, parts_mode=body.parts)
     res["fit_report_text"] = fit_report_text(res)
     return res
 
 
 @app.post("/api/zip")
 def do_zip(body: ArrangeBody) -> Response:
-    res = arrange(body.chorale, body.roster, body.grade)
+    res = arrange(body.chorale, body.roster, body.grade, parts_mode=body.parts)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for p in res["parts"]:

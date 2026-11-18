@@ -350,3 +350,58 @@ def test_lines_stay_in_order(cid, grade, roster):
     fp = {(p, v): best.fits[p] for p, v in best.assign.items()}
     assert not over_melody(best.assign, fp, means)
     assert not inversions(best.assign, fp, means)
+
+
+# ---------------------------------------------------------------------------
+# "Split sections" mode
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("roster", [LOPSIDED, ORCHESTRA], ids=["band", "orchestra"])
+@pytest.mark.parametrize("grade", ["1", "3"])
+@pytest.mark.parametrize("cid", SAMPLE_CHORALES[:3])
+def test_split_sections_mode(cid, grade, roster):
+    res = arrange(cid, roster, grade, with_parts=False, parts_mode="multiple")
+    by_inst: dict[str, list[dict]] = {}
+    for a in res["assignment"]:
+        by_inst.setdefault(a["instrument"], []).append(a)
+    for inst, entries in by_inst.items():
+        assert sum(e["players"] for e in entries) == roster[inst]
+        info = INSTRUMENTS[inst]
+        expected = 1 if info.family == "mallets" else min(roster[inst], len(info.prefs), 3)
+        assert len(entries) == expected, (inst, [e["part"] for e in entries])
+        if len(entries) > 1:
+            lines = [e["voice"] for e in entries]
+            assert len(set(lines)) == len(lines), (inst, lines)            # different lines
+            assert all(v in info.prefs for v in lines), (inst, lines)      # lines that suit the instrument
+            assert [e["part"] for e in entries] == [f"{inst} {n}" for n in range(1, len(entries) + 1)]
+    assert all(res["voices"][v] for v in FOUR_LINES)
+    assert any("split into numbered parts" in n for n in res["notes"])
+
+
+def test_single_mode_keeps_one_part_per_instrument():
+    res = arrange("bwv66.6", ORCHESTRA, "1", with_parts=False, parts_mode="single")
+    assert all(a["part"] == a["instrument"] for a in res["assignment"])
+
+
+@pytest.mark.parametrize("cid", SAMPLE_CHORALES[:3])
+def test_split_parts_transpose_back_correctly(cid):
+    cfg = grade_cfg("3")
+    ch, _ = chmod.simplify(chmod.load(cid), cfg["rhythm"])
+    best = search_keys(ch, LOPSIDED, cfg, "multiple")[0]
+    key_iv = key_interval(ch.key.tonic.name, best.tonic)
+    for name, v in best.assign.items():
+        inst = INSTRUMENTS[best.inst(name)]
+        xml = to_musicxml(build_part(ch, v, inst, best, best.fits[name], cfg["label"]))
+        part = converter.parseData(xml, format="musicxml").parts[0]
+        sounding = inst.written_interval.reverse() if inst.written_semitones else None
+        actual = {}
+        for n in part.flatten().notes:
+            if n.tie is not None and n.tie.type in ("stop", "continue"):
+                continue
+            p = n.pitch.transpose(sounding) if sounding is not None else n.pitch
+            actual[round(float(n.offset), 4)] = int(p.ps)
+        assert actual == expected_concert(ch, v, best.fits[name], key_iv), (cid, name, v)
+
+
+def test_unknown_parts_mode_errors():
+    with pytest.raises(ArrangeError):
+        arrange("bwv66.6", LOPSIDED, "1", parts_mode="lots")

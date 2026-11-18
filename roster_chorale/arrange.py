@@ -264,7 +264,8 @@ def assign_voices(cost: dict[tuple[str, str], float], fits: dict[tuple[str, str]
                   real_bass: dict[str, bool] | None = None,
                   inst_of: dict[str, str] | None = None,
                   means: dict[str, float] | None = None,
-                  below: set[tuple[str, str]] | None = None) -> tuple[dict[str, str], float]:
+                  below: set[tuple[str, str]] | None = None,
+                  natural_lines: bool = False) -> tuple[dict[str, str], float]:
     """Exact search: choose distinct parts to cover the required voices, everyone else
     takes their cheapest voice; then a hill-climb that also weighs balance.
 
@@ -280,6 +281,48 @@ def assign_voices(cost: dict[tuple[str, str], float], fits: dict[tuple[str, str]
     # optimistic per-pair cost (assumes out-of-range phrases can rest) to seed the search
     seed = {(i, v): cost[i, v] + COST_TACET * len(fits[i, v].bad) for i in insts for v in VOICES}
     cheapest = {i: min(VOICES, key=lambda v: (seed[i, v], VOICES.index(v))) for i in insts}
+    # parts split from one instrument (Flute 1, Flute 2) must play different lines
+    siblings: dict[str, list[str]] = {}
+    for i in insts:
+        siblings.setdefault(inst_of[i], []).append(i)
+    siblings = {k: ps for k, ps in siblings.items() if len(ps) > 1}
+    # In "split sections" mode a section stays on its natural lines (Flute 1/2 on S/A,
+    # Trombone 1/2 on T/B). Emergency splits that cover missing lines may use any line.
+    allowed: dict[str, tuple[str, ...]] = {}
+    for k, ps in siblings.items():
+        prefs = INSTRUMENTS[k].prefs
+        for pt in ps:
+            allowed[pt] = prefs if natural_lines and len(ps) <= len(prefs) else VOICES
+
+    def ranked_for(pt: str) -> list[str]:
+        return sorted(allowed.get(pt, VOICES), key=lambda v: (seed[pt, v], VOICES.index(v)))
+
+    for ps in siblings.values():
+        for pt, v in zip(ps, ranked_for(ps[0])):
+            cheapest[pt] = v
+
+    def spread_siblings(a: dict[str, str], fixed: set[str]) -> dict[str, str] | None:
+        """Move unfixed sibling parts off lines a sibling already plays."""
+        for ps in siblings.values():
+            used = {a[pt] for pt in ps if pt in fixed}
+            if len(used) < sum(1 for pt in ps if pt in fixed):
+                return None
+            if any(a[pt] not in allowed.get(pt, VOICES) for pt in ps if pt in fixed):
+                return None
+            for pt in ps:
+                if pt in fixed:
+                    continue
+                if a[pt] in used or a[pt] not in allowed.get(pt, VOICES):
+                    free = [v for v in ranked_for(pt) if v not in used]
+                    if not free:
+                        return None
+                    a[pt] = free[0]
+                used.add(a[pt])
+        return a
+
+    def siblings_ok(a: dict[str, str]) -> bool:
+        return all(len({a[pt] for pt in ps}) == len(ps) and all(a[pt] in allowed[pt] for pt in ps)
+                   for ps in siblings.values())
 
     has_low = any(INSTRUMENTS[inst_of[i]].low for i in insts)
 
@@ -316,6 +359,8 @@ def assign_voices(cost: dict[tuple[str, str], float], fits: dict[tuple[str, str]
                 continue
             assign = {i: cheapest[i] for i in insts}
             assign.update(dict(zip(chosen, voices)))
+            if siblings and spread_siblings(assign, set(chosen)) is None:
+                continue
             if n <= 3 and len({assign[i] for i in core}) < n:
                 continue    # with few instrument types, spread them over distinct voices
             quick = sum(seed[i, v] for i, v in assign.items())
@@ -332,6 +377,8 @@ def assign_voices(cost: dict[tuple[str, str], float], fits: dict[tuple[str, str]
             return False
         if any(a[i] not in used for i in insts if i not in core):
             return False             # a mallet part must double a line someone else plays
+        if not siblings_ok(a):
+            return False
         return n > 3 or len(used) == n
 
     cur, cur_total = dict(best_assign), total_of(best_assign)
@@ -423,7 +470,28 @@ def candidate_keys(counts: dict[str, int], cfg: dict, mode: str) -> list[tuple[s
     return out
 
 
-def split_options(counts: dict[str, int]) -> list[dict[str, tuple[str, int]]]:
+PARTS_MODES = ("single", "multiple")
+MAX_SECTION_PARTS = 3
+
+
+def section_split(counts: dict[str, int]) -> dict[str, tuple[str, int]]:
+    """'Split sections' mode: every section with players to spare divides across the lines
+    it suits (up to 3 parts, never more parts than players): Flute 1/2, Clarinet 1/2/3,
+    Violin 1/2, Trombone 1/2. Mallets, timpani and percussion stay as one part."""
+    parts: dict[str, tuple[str, int]] = {}
+    for i, n in counts.items():
+        inst = INSTRUMENTS[i]
+        k = 1 if inst.family == "mallets" else min(n, len(inst.prefs), MAX_SECTION_PARTS)
+        if k <= 1:
+            parts[i] = (i, n)
+            continue
+        base, extra = divmod(n, k)
+        for j in range(k):
+            parts[f"{i} {j + 1}"] = (i, base + (1 if j < extra else 0))
+    return parts
+
+
+def split_options(counts: dict[str, int], mode: str = "single") -> list[dict[str, tuple[str, int]]]:
     """Ways to turn the roster into parts: {part: (instrument, players)}.
 
     Normally one part per instrument. When there are fewer instrument types than
@@ -431,6 +499,12 @@ def split_options(counts: dict[str, int]) -> list[dict[str, tuple[str, int]]]:
     ("Flute 1", "Flute 2") so that every line is covered: as many lines as there are
     players, up to four. Mallets only double, so they are never split."""
     identity = {i: (i, n) for i, n in counts.items()}
+    if mode == "multiple":
+        sections = section_split(counts)
+        core_parts = [pt for pt, (i, _) in sections.items() if INSTRUMENTS[i].family != "mallets"]
+        if len(core_parts) >= min(len(VOICES), sum(n for i, n in counts.items() if INSTRUMENTS[i].family != "mallets")):
+            return [sections] + ([identity] if sections != identity else [])
+        # still short of lines (tiny group): fall back to the minimal split below
     core = {i: n for i, n in counts.items() if INSTRUMENTS[i].family != "mallets"}
     if not core:
         return [identity]
@@ -536,7 +610,7 @@ def part_label(inst: Inst, part: str) -> str:
     return f"{full} {num}"
 
 
-def search_keys(ch: Chorale, counts: dict[str, int], cfg: dict) -> list[KeyResult]:
+def search_keys(ch: Chorale, counts: dict[str, int], cfg: dict, parts_mode: str = "single") -> list[KeyResult]:
     mode = ch.key.mode if ch.key.mode in ("major", "minor") else "major"
     rng = ranges_midi(cfg)
     notes = {v: voice_notes(ch, v) for v in VOICES}
@@ -560,14 +634,21 @@ def search_keys(ch: Chorale, counts: dict[str, int], cfg: dict) -> list[KeyResul
                     cost[name, v] += COST_BELOW_BASS
                     below.add((name, v))
         best_opt = None
-        for parts in split_options(counts):
+        for parts in split_options(counts, parts_mode):
             inst_of = {pt: i for pt, (i, _) in parts.items()}
             pc = {pt: n for pt, (_, n) in parts.items()}
             cost_p = {(pt, v): cost[i, v] for pt, i in inst_of.items() for v in VOICES}
             fits_p = {(pt, v): fits[i, v] for pt, i in inst_of.items() for v in VOICES}
             real_bass = {pt: fits[i, "B"].octave <= 0 for pt, i in inst_of.items()}
             below_p = {(pt, v) for pt, i in inst_of.items() for v in VOICES if (i, v) in below}
-            assign, total = assign_voices(cost_p, fits_p, pc, n_phrases, real_bass, inst_of, mean, below_p)
+            natural = parts_mode == "multiple" and any(pt != i for pt, i in inst_of.items())
+            try:
+                assign, total = assign_voices(cost_p, fits_p, pc, n_phrases, real_bass, inst_of, mean, below_p,
+                                              natural_lines=natural)
+            except AssertionError:      # no voicing keeps every section on its natural lines
+                assign, total = assign_voices(cost_p, fits_p, pc, n_phrases, real_bass, inst_of, mean, below_p)
+            if parts_mode == "multiple" and all(pt == i for pt, i in inst_of.items()) and best_opt is not None:
+                continue                # the unsplit fallback only counts if splitting found nothing
             if best_opt is None or total < best_opt[1]:
                 best_opt = (assign, total, inst_of, pc)
         assign, total, inst_of, pc = best_opt
@@ -763,8 +844,13 @@ def safe_filename(s: str) -> str:
 # ---------------------------------------------------------------------------
 # The whole job
 # ---------------------------------------------------------------------------
-def arrange(chorale_id: str, counts: dict[str, int], grade: str | float, with_parts: bool = True) -> dict:
+def arrange(chorale_id: str, counts: dict[str, int], grade: str | float, with_parts: bool = True,
+            parts_mode: str = "single") -> dict:
+    """parts_mode: "single" = one part per instrument (sections split only when needed to cover
+    all four lines); "multiple" = sections split into numbered parts (Flute 1, Flute 2...)."""
     cfg = grade_cfg(grade)
+    if parts_mode not in PARTS_MODES:
+        raise ArrangeError(f"Unknown parts option {parts_mode!r}; use 'single' or 'multiple'.")
     unknown = [k for k in counts if k not in INSTRUMENTS]
     if unknown:
         raise ArrangeError(f"Unknown instruments: {', '.join(unknown)}")
@@ -783,7 +869,7 @@ def arrange(chorale_id: str, counts: dict[str, int], grade: str | float, with_pa
 
     original = chmod.load(meta["id"])
     ch, rhythm = chmod.simplify(original, cfg["rhythm"])
-    results = search_keys(ch, counts, cfg)
+    results = search_keys(ch, counts, cfg, parts_mode)
     best = results[0]
     short, long = explain(results, ch, cfg)
 
@@ -801,11 +887,16 @@ def arrange(chorale_id: str, counts: dict[str, int], grade: str | float, with_pa
     for pt, i in best.part_inst.items():
         if pt != i:
             split.setdefault(i, []).append(pt)
-    for i, pts in split.items():
-        desc = ", ".join(f"{pt} on {VOICE_NAMES[best.assign[pt]].lower()} ({_plural(best.players[pt], 'player')})"
+    def _desc(pts: list[str]) -> str:
+        return ", ".join(f"{pt} on {VOICE_NAMES[best.assign[pt]].lower()} ({_plural(best.players[pt], 'player')})"
                          for pt in pts)
-        notes.append(f"Not enough instrument types to cover all four lines, so the {i.lower()} section is split "
-                     f"into {len(pts)} parts: {desc}.")
+    if parts_mode == "multiple" and split:
+        notes.append("Sections are split into numbered parts: "
+                     + "; ".join(_desc(pts) for pts in split.values()) + ".")
+    else:
+        for i, pts in split.items():
+            notes.append(f"Not enough instrument types to cover all four lines, so the {i.lower()} section is split "
+                         f"into {len(pts)} parts: {_desc(pts)}.")
     if best.inverted:
         means = {v: sum(n.midi for n in voice_notes(ch, v)) / max(len(voice_notes(ch, v)), 1) for v in VOICES}
         fp = {(pt, v): best.fits[pt] for pt, v in best.assign.items()}
@@ -940,6 +1031,7 @@ def arrange(chorale_id: str, counts: dict[str, int], grade: str | float, with_pa
         "chorale": {"id": meta["id"], "bwv": meta["bwv"], "title": meta["title"], "original_key": ch.key_name,
                     "measures": meta["measures"]},
         "grade": {"value": str(grade), "label": cfg["label"]},
+        "parts_mode": parts_mode,
         "key": {**key_row(best), "concert": best.name, "transpose_semitones": best.semitones},
         "runner_up": key_row(results[1]) if len(results) > 1 else None,
         "keys_considered": [key_row(r) for r in results],

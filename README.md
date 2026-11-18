@@ -35,7 +35,7 @@ Roster Chorale starts from **the players you have** and **the grade you're aimin
 | 🎚️ **Targets a grade** | Grade ½, 1, 2 or 3 sets each instrument's range, the allowed concert keys, and how much the rhythm is simplified. |
 | 🔑 **Chooses the key** | Tries every allowed key, counts how many notes fall out of range for *your* roster, and explains the winner and why the runner-up lost. |
 | 🎻 **Voices the chorale** | Puts every instrument on soprano, alto, tenor or bass so every line is covered, the bass goes to low instruments, and no chord is turned upside down. |
-| ✂️ **Splits small sections** | Only a few instrument types? Players split into numbered parts (Flute 1, Flute 2…) so all four lines are still heard — a clarinet quartet, a flute choir, two trumpets and a horn. |
+| ✂️ **One part or split sections — your call** | *One per instrument* gives every flute the same part. *Split sections* divides each section across the lines it suits — Flute 1/2, Clarinet 1/2/3, Trumpet 1/2, Violin 1/2. Either way, small groups split when needed so all four lines are heard (a clarinet quartet, a flute choir, two trumpets and a horn). |
 | 🔁 **Fits octaves by phrase** | Moves whole parts, then whole phrases (fermata to fermata) — never single notes — and rests a part for a phrase only when someone else covers it. |
 | 🥁 **Writes percussion too** | Timpani on tonic and dominant at the cadences; bass drum and suspended cymbal framing every phrase. |
 | 🖨️ **Prints real parts** | Every part is transposed (Bb, Eb, F, octave instruments, alto clef…) and engraved in your browser. Print all parts as PDF, one per page, or download MusicXML for MuseScore. |
@@ -46,7 +46,7 @@ Roster Chorale starts from **the players you have** and **the grade you're aimin
 Open **[roster-chorale.vercel.app](https://roster-chorale.vercel.app)**, then:
 
 1. **Add your roster.** Upload a spreadsheet, paste rows, or type it. No roster handy? Use the sample [`lopsided-band.xlsx`](samples/lopsided-band.xlsx).
-2. **Pick a chorale** by BWV number or title — or hit **🎲 Surprise me** — and choose a **target grade**.
+2. **Pick a chorale** by BWV number or title — or hit **🎲 Surprise me** — choose a **target grade**, and choose **one part per instrument** or **split sections**.
 3. **Arrange.** Read the key decision, see who plays what, and check the fit report.
 4. **Print all parts** (choose *Save as PDF* in the print dialog) or **Download MusicXML (.zip)**.
 5. Switch the grade from **1** to **3** and arrange again: the eighth-note passing tones come back and the octave fixes disappear.
@@ -109,7 +109,10 @@ flowchart LR
 2. **Whole-part octave.** Each instrument's line moves up or down by octaves to sit in its range — checked in **written** pitch, after transposing.
 3. **Phrase-level octave.** If notes still fall outside, whole phrases (fermata to fermata) move by an octave. Never single notes.
 4. **Phrase rests.** If a phrase can't fit an instrument in any octave *and* another instrument on that line plays it cleanly, that part rests for the phrase (never more than half its phrases).
-5. **Splitting.** If there are fewer instrument types than lines, sections with players to spare split into numbered parts (Flute 1, Flute 2…) until every line is covered — as many lines as there are players, up to four. Part 1 takes the highest line and the larger group. Big ensembles are never split.
+5. **Parts per instrument.**
+   - *One per instrument* (default): one part per instrument. Only if there are fewer instrument types than lines do sections with players to spare split (Flute 1, Flute 2…) until every line is covered — as many lines as there are players, up to four.
+   - *Split sections*: every section with two or more players divides across the lines it suits, up to three parts and never more parts than players — Flute 1/2 on soprano/alto, Clarinet 1/2/3 on soprano/alto/tenor, Trombone 1/2 on tenor/bass, Violin 1/2, Viola 1/2, Cello 1/2. Mallets, timpani and percussion stay as one part.
+   - Part 1 always takes the highest line and the larger group of players.
 6. **Voicing.** Every voice is covered; the bass goes to low instruments and someone plays it at pitch or lower; no upper voice is pushed below the bass (that would invert the chords); instruments get lines that suit them; no voice is left thin; mallets only double.
 7. **Lines in order.** Nothing sounds above the melody or below the bass: if a part has to move up an octave (say, a clarinet playing the bass line), the parts above it follow when their range allows. If it can't be avoided, the page says so.
 8. **Key score.** Fewest notes still out of range wins, then fewer octave fixes, more natural voicing, keys familiar to each section, and finally the smallest move from Bach's key. If nothing fits, you get the **least-bad** key in red, with every problem note listed by measure.
@@ -151,6 +154,7 @@ Open <http://localhost:8321>. The first request takes a couple of seconds while 
 
 ```bash
 uv run python -m roster_chorale samples/lopsided-band.xlsx --chorale bwv66.6 --grade 1 --out out/
+uv run python -m roster_chorale samples/lopsided-band.xlsx --chorale bwv66.6 --grade 2 --parts multiple --out out/
 ```
 
 Writes one MusicXML file per instrument plus `fit-report.txt`, and prints the report.
@@ -161,7 +165,7 @@ Writes one MusicXML file per instrument plus `fit-report.txt`, and prints the re
 uv run pytest
 ```
 
-About 290 tests cover alias mapping, roster parsing (xlsx, csv, pasted and typed), written-pitch ranges for every transposing instrument, key search, voice coverage, rhythm simplification, phrase-only octave shifts, timpani tuning, and a **musical-correctness check**: every written part is transposed back to concert pitch and compared note for note with the voice it was assigned.
+About 400 tests cover alias mapping, roster parsing (xlsx, csv, pasted and typed), written-pitch ranges for every transposing instrument, key search, voice coverage, rhythm simplification, phrase-only octave shifts, timpani tuning, and a **musical-correctness check**: every written part is transposed back to concert pitch and compared note for note with the voice it was assigned.
 
 ## 🔌 API
 
@@ -171,7 +175,7 @@ Interactive docs at [`/api/docs`](https://roster-chorale.vercel.app/api/docs).
 |---|---|---|---|
 | `GET` | `/api/chorales` | — | the 355 clean four-part chorales, instruments and grades |
 | `POST` | `/api/roster` | multipart `file` (.xlsx/.csv) **or** form field `text` | cleaned counts + unrecognised names |
-| `POST` | `/api/arrange` | `{"roster": {...}, "chorale": "bwv66.6", "grade": "1"}` | key decision, voicing, fit report, MusicXML per part |
+| `POST` | `/api/arrange` | `{"roster": {...}, "chorale": "bwv66.6", "grade": "1", "parts": "single"}` — `parts` is `"single"` (default) or `"multiple"` | key decision, voicing, fit report, MusicXML per part |
 | `POST` | `/api/zip` | same as `/api/arrange` | `application/zip` of all parts + `fit-report.txt` |
 
 ```bash
@@ -216,7 +220,7 @@ docs/                       screenshots and the original build spec
 
 - Chorales come from the [music21](https://www.music21.org/) corpus: the 371 Riemenschneider chorales plus other plain chorale files (such as BWV 66.6), keeping the **355** with exactly four parts named Soprano/Alto/Tenor/Bass. Chorales without a title in music21 appear as “Chorale from BWV …”.
 - Repeat signs in the source aren't reproduced; repeated sections print once.
-- Sections split into numbered parts only when needed to cover the four lines; a full band still gets one part per instrument. Euphonium is bass clef.
+- Split sections go up to three parts per instrument (no Horn 4 or Trumpet 4). Euphonium is bass clef.
 - No dynamics, articulations or audio playback.
 
 ## 🙏 Credits

@@ -92,6 +92,7 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .grades label { flex: 1; }
 .grades input { position: absolute; opacity: 0; pointer-events: none; }
 .grades span { display: block; text-align: center; border: 1px solid var(--line); border-radius: 10px; padding: 10px 0; cursor: pointer; font-weight: 600; }
+.parts-mode span { font-size: 13px; padding: 9px 4px; }
 .grades input:checked + span { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .grades input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: 2px; }
 .arrange-row { margin-top: 18px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
@@ -221,6 +222,12 @@ footer { color: var(--muted); font-size: 13px; padding: 10px 0 40px; }
           <label><input type="radio" name="grade" value="2"><span>2</span></label>
           <label><input type="radio" name="grade" value="3"><span>3</span></label>
         </div>
+        <label class="lbl" style="margin-top:16px">Parts per instrument</label>
+        <div class="grades parts-mode" role="radiogroup" aria-label="Parts per instrument">
+          <label><input type="radio" name="parts" value="single" checked><span>One per instrument</span></label>
+          <label><input type="radio" name="parts" value="multiple"><span>Split sections</span></label>
+        </div>
+        <p class="small muted" style="margin-top:6px"><b>One per instrument:</b> every flute reads the same part (small groups still split if needed to cover all four lines). <b>Split sections:</b> sections divide across the lines they suit, as Flute 1/2, Clarinet 1/2/3, Violin 1/2.</p>
         <p class="small muted" style="margin-top:10px">The grade sets each instrument's range, which concert keys are allowed (flat keys for winds, sharp keys for strings; mixed groups get the best compromise), and how much the rhythm is simplified (grade ½–1: eighth notes merged into quarters; grade 2: sixteenths into eighths; grade 3: as written).</p>
       </div>
     </div>
@@ -293,6 +300,7 @@ const state = {
   classify: LS.get("classify", {}),        // raw name -> standard name or ""
   chorale: LS.get("chorale", "bwv66.6"),
   grade: LS.get("grade", "1"),
+  parts: LS.get("parts", "single"),
   result: null,
   lastBody: null,   // the request that produced `result`, reused for the zip download
 };
@@ -432,6 +440,10 @@ function initPicker() {
   });
   choose(state.chorale);
 }
+document.querySelectorAll('input[name=parts]').forEach((r) => {
+  r.checked = r.value === state.parts;
+  r.addEventListener("change", () => { state.parts = r.value; LS.set("parts", r.value); });
+});
 document.querySelectorAll('input[name=grade]').forEach((r) => {
   r.checked = r.value === state.grade;
   r.addEventListener("change", () => { state.grade = r.value; LS.set("grade", r.value); });
@@ -443,7 +455,7 @@ function updateArrangeBtn() {
 }
 
 // ---------- arrange ----------
-function body() { return JSON.stringify({ roster: effectiveCounts(), chorale: state.chorale, grade: state.grade }); }
+function body() { return JSON.stringify({ roster: effectiveCounts(), chorale: state.chorale, grade: state.grade, parts: state.parts }); }
 $("#arrange").addEventListener("click", async () => {
   const btn = $("#arrange");
   btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> Arranging…`;
