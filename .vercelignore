@@ -4,3 +4,4 @@ out/
 .venv/
 .claude/
 docs/
+.github/

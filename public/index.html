@@ -63,7 +63,7 @@ button:hover, .btn:hover { border-color: var(--muted); }
 button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 button.primary:hover { filter: brightness(1.08); }
 button:disabled { opacity: .5; cursor: not-allowed; }
-.drop { border: 1.5px dashed var(--line); border-radius: 12px; padding: 18px; text-align: center; color: var(--muted); cursor: pointer; transition: .15s; }
+.drop { display: block; border: 1.5px dashed var(--line); border-radius: 12px; padding: 18px; text-align: center; color: var(--muted); cursor: pointer; transition: .15s; }
 .drop.over, .drop:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--ink); }
 .drop input { display: none; }
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -77,7 +77,7 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .chip input { width: 52px; padding: 2px 6px; border-radius: 999px; text-align: center; background: var(--panel); }
 .total { font-weight: 600; margin-top: 10px; }
 .unrec { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
-.unrec-row { display: grid; grid-template-columns: 1fr 200px; gap: 10px; align-items: center; padding: 4px 0; }
+.unrec-row { display: grid; grid-template-columns: 1fr 260px; gap: 10px; align-items: center; padding: 4px 0; }
 @media (max-width: 520px) { .unrec-row { grid-template-columns: 1fr; } }
 
 .picker { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; }
