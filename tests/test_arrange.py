@@ -74,17 +74,18 @@ def test_key_search_minimises_out_of_range_notes(cid, roster):
 
 
 def test_key_search_picks_the_key_with_fewest_out_of_range_notes_single_instrument():
-    # One trumpet section on the melody: the chosen key leaves the fewest notes outside Bb3-C5.
+    # One trumpet on the melody: the chosen key leaves the fewest notes outside Bb3-C5 once
+    # octave and phrase shifts are applied ("fewest notes still out of range wins").
     cfg = grade_cfg("1")
     ch, _ = chmod.simplify(chmod.load("bwv269"), cfg["rhythm"])
-    results = search_keys(ch, {"Trumpet": 4}, cfg)
-    sop = voice_notes(ch, "S")
+    results = search_keys(ch, {"Trumpet": 1}, cfg)
+    assert results[0].residual == min(r.residual for r in results)
     lo, hi = ranges_midi(cfg)["Trumpet"]
-    raw = {}
-    for r in results:
-        base = r.semitones + INSTRUMENTS["Trumpet"].written_semitones
-        raw[r.name] = min(sum(1 for n in sop if not lo <= n.midi + base + 12 * o <= hi) for o in (-1, 0, 1))
-    assert raw[results[0].name] == min(raw.values())
+    best = results[0]
+    f = best.fits["Trumpet"]
+    base = best.semitones + INSTRUMENTS["Trumpet"].written_semitones
+    printed_out = sum(1 for n in voice_notes(ch, "S") if not lo <= n.midi + base + 12 * f.shift_for(n.phrase) <= hi)
+    assert printed_out == best.residual
 
 
 @pytest.mark.parametrize("grade", ["0.5", "1", "2", "3"])
@@ -340,16 +341,41 @@ def test_no_printed_note_out_of_range_for_sample_band(grade):
 @pytest.mark.parametrize("grade", ["1", "3"])
 @pytest.mark.parametrize("cid", SAMPLE_CHORALES[:6])
 def test_lines_stay_in_order(cid, grade, roster):
-    """Nothing sounds above the melody line or below the bass line."""
-    from roster_chorale.arrange import inversions, over_melody
+    """Nothing sounds above the melody line or below the bass line. Small groups (one or two kinds
+    of instrument) can't always manage that inside narrow grade ranges; then the page must say so."""
+    from roster_chorale.arrange import inversions, line_shares, over_melody
     from roster_chorale.instruments import VOICES
     cfg = grade_cfg(grade)
     ch, _ = chmod.simplify(chmod.load(cid), cfg["rhythm"])
     best = search_keys(ch, roster, cfg)[0]
-    means = {v: sum(n.midi for n in voice_notes(ch, v)) / len(voice_notes(ch, v)) for v in VOICES}
-    fp = {(p, v): best.fits[p] for p, v in best.assign.items()}
-    assert not over_melody(best.assign, fp, means)
-    assert not inversions(best.assign, fp, means)
+    if line_shares(roster, cfg) is None:
+        means = {v: sum(n.midi for n in voice_notes(ch, v)) / len(voice_notes(ch, v)) for v in VOICES}
+        fp = {(p, v): best.fits[p] for p, v in best.assign.items()}
+        assert not over_melody(best.assign, fp, means)
+        assert not inversions(best.assign, fp, means)
+        return
+    if _melody_bass_violations(ch, best):
+        res = arrange(cid, roster, grade, with_parts=False)
+        assert res["warnings"], (cid, grade, roster)
+
+
+def _melody_bass_violations(ch, best) -> int:
+    """Phrases where some line sounds above the melody or below the bass."""
+    pm = {}
+    for v in "SATB":
+        acc = {}
+        for n in voice_notes(ch, v):
+            acc.setdefault(n.phrase, []).append(n.midi)
+        pm[v] = {ph: sum(m) / len(m) for ph, m in acc.items()}
+    lvl = {}
+    for p, v in best.assign.items():
+        lvl.setdefault(v, []).append(best.fits[p])
+    bad = 0
+    for ph in pm["S"]:
+        snd = {v: [pm[v][ph] + 12 * f.shift_for(ph) for f in fs] for v, fs in lvl.items() if ph in pm[v]}
+        bad += "S" in snd and any(max(x) > min(snd["S"]) for v, x in snd.items() if v != "S")
+        bad += "B" in snd and any(min(x) < max(snd["B"]) for v, x in snd.items() if v != "B")
+    return bad
 
 
 # ---------------------------------------------------------------------------
@@ -366,9 +392,12 @@ def test_split_sections_mode(cid, grade, roster):
     for inst, entries in by_inst.items():
         assert sum(e["players"] for e in entries) == roster[inst]
         info = INSTRUMENTS[inst]
-        expected = 1 if info.family == "mallets" else min(roster[inst], len(info.prefs), 3)
+        octaves = len(info.prefs) == 1 and info.low and roster[inst] >= 2   # tubas, basses: two parts in octaves
+        expected = 1 if info.family == "mallets" else (2 if octaves else min(roster[inst], len(info.prefs), 3))
         assert len(entries) == expected, (inst, [e["part"] for e in entries])
-        if len(entries) > 1:
+        if octaves:
+            assert {e["voice"] for e in entries} == {"B"}
+        elif len(entries) > 1:
             lines = [e["voice"] for e in entries]
             assert len(set(lines)) == len(lines), (inst, lines)            # different lines
             assert all(v in info.prefs for v in lines), (inst, lines)      # lines that suit the instrument
@@ -405,3 +434,94 @@ def test_split_parts_transpose_back_correctly(cid):
 def test_unknown_parts_mode_errors():
     with pytest.raises(ArrangeError):
         arrange("bwv66.6", LOPSIDED, "1", parts_mode="lots")
+
+# ---------------------------------------------------------------------------
+# Split sections: low one-line sections divide in octaves
+# ---------------------------------------------------------------------------
+LOW_BRASS = {"Flute": 6, "Clarinet": 5, "Trumpet": 4, "Horn": 2, "Trombone": 3, "Euphonium": 3, "Tuba": 3}
+
+
+@pytest.mark.parametrize("cid,grade", [("bwv66.6", "3"), ("bwv269", "3")])
+def test_split_sections_divides_tubas_in_octaves(cid, grade):
+    res = arrange(cid, LOW_BRASS, grade, parts_mode="multiple")
+    tubas = {a["part"]: a for a in res["assignment"] if a["instrument"] == "Tuba"}
+    assert set(tubas) == {"Tuba 1", "Tuba 2"}
+    assert tubas["Tuba 1"]["players"] == 2 and tubas["Tuba 2"]["players"] == 1
+    assert tubas["Tuba 1"]["voice"] == tubas["Tuba 2"]["voice"] == "B"
+    assert tubas["Tuba 2"]["part_octave"] == tubas["Tuba 1"]["part_octave"] - 1
+    assert all(not a["problems"] for a in tubas.values())
+    assert any("Tuba 2 on bass (1 player, an octave lower)" in n for n in res["notes"])
+    names = [p["part_name"] for p in res["parts"]]
+    assert "Tuba 1" in names and "Tuba 2" in names
+    # the two printed parts really are an octave apart
+    parts = {p["part"]: converter.parseData(p["musicxml"], format="musicxml").parts[0] for p in res["parts"]}
+    first = [n.pitch.ps for n in parts["Tuba 1"].recurse().notes]
+    second = [n.pitch.ps for n in parts["Tuba 2"].recurse().notes]
+    assert len(first) == len(second) and sum(1 for a, b in zip(first, second) if a - b == 12) > len(first) / 2
+
+
+def test_one_tuba_or_single_mode_stays_one_part():
+    one = arrange("bwv66.6", {**LOW_BRASS, "Tuba": 1}, "3", parts_mode="multiple", with_parts=False)
+    single = arrange("bwv66.6", LOW_BRASS, "3", parts_mode="single", with_parts=False)
+    for res in (one, single):
+        assert [a["part"] for a in res["assignment"] if a["instrument"] == "Tuba"] == ["Tuba"]
+
+
+# ---------------------------------------------------------------------------
+# Small groups (brass choirs, tuba quartets): lines shared by register and players
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("roster,expected", [
+    ({"Tuba": 4}, {"S": "Tuba", "A": "Tuba", "T": "Tuba", "B": "Tuba"}),
+    ({"Euphonium": 4, "Tuba": 4}, {"S": "Euphonium", "A": "Euphonium", "T": "Tuba", "B": "Tuba"}),
+    ({"Euphonium": 6, "Tuba": 2}, {"S": "Euphonium", "A": "Euphonium", "T": "Euphonium", "B": "Tuba"}),
+    ({"Horn": 2, "Trombone": 2}, {"S": "Horn", "A": "Horn", "T": "Trombone", "B": "Trombone"}),
+    ({"Trumpet": 4, "Trombone": 4, "Tuba": 2}, {"S": "Trumpet", "A": "Trumpet", "T": "Trombone", "B": "Tuba"}),
+])
+@pytest.mark.parametrize("mode", ["single", "multiple"])
+def test_small_groups_share_the_lines_by_register(roster, expected, mode):
+    res = arrange("bwv66.6", roster, "3", parts_mode=mode)
+    got = {a["voice"]: a["instrument"] for a in res["assignment"]}
+    assert got == expected
+    assert sum(a["players"] for a in res["assignment"]) == sum(roster.values())
+    # Bach's lines span wider than a brass choir's grade ranges: any compromise is reported
+    assert all("don't leave room" in w or "upside down" in w for w in res["warnings"]), res["warnings"]
+    assert len(res["parts"]) == len(res["assignment"])
+
+
+def test_tuba_quartet_parts_are_numbered_top_down_and_in_range():
+    res = arrange("bwv269", {"Tuba": 8}, "3", parts_mode="multiple")
+    assert [(a["part"], a["voice"], a["players"]) for a in res["assignment"]] == [
+        ("Tuba 1", "S", 2), ("Tuba 2", "A", 2), ("Tuba 3", "T", 2), ("Tuba 4", "B", 2)]
+    assert all(not a["problems"] for a in res["assignment"])
+
+
+def test_band_voicing_is_unchanged_by_small_group_sharing():
+    from roster_chorale.arrange import line_shares
+    assert line_shares(LOPSIDED, grade_cfg("1")) is None
+    assert line_shares({"Trumpet": 2, "Horn": 1, "Trombone": 1, "Tuba": 1}, grade_cfg("1")) is None
+
+
+@pytest.mark.parametrize("roster", [{"Euphonium": 4, "Tuba": 4}, {"Euphonium": 6, "Tuba": 2},
+                                    {"Horn": 2, "Trombone": 2}, {"Trumpet": 4, "Trombone": 4, "Tuba": 2}])
+def test_small_group_lines_stay_in_order_phrase_by_phrase(roster):
+    cfg = grade_cfg("3")
+    ch, _ = chmod.simplify(chmod.load("bwv66.6"), cfg["rhythm"])
+    res = arrange("bwv66.6", roster, "3", parts_mode="multiple", with_parts=False)
+    assert all(not a["problems"] for a in res["assignment"])
+    level = {}
+    for a in res["assignment"]:
+        shifts = {s["phrase"] - 1: s["octaves"] for s in a["phrase_shifts"]}
+        level.setdefault(a["voice"], []).append((a["part_octave"], shifts))
+    means = {}
+    for v in level:
+        acc = {}
+        for n in voice_notes(ch, v):
+            acc.setdefault(n.phrase, []).append(n.midi)
+        means[v] = {ph: sum(m) / len(m) for ph, m in acc.items()}
+    crossed = 0      # phrases where a line sounds above the melody or below the bass
+    for ph in means["S"]:
+        snd = {v: [means[v][ph] + 12 * (o + s.get(ph, 0)) for o, s in level[v]] for v in level if ph in means[v]}
+        crossed += any(max(x) > min(snd["S"]) for v, x in snd.items() if v != "S")
+        crossed += any(min(x) < max(snd["B"]) for v, x in snd.items() if v != "B")
+    # where the ranges really don't leave room, the page says so
+    assert (crossed == 0) == (not any("don't leave room" in w for w in res["warnings"]))
