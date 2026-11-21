@@ -5,5 +5,12 @@
       "excludeFiles": "{tests/**,scripts/**,out/**,.venv/**,.claude/**,roster-chorale.md,README.md,docs/**}",
       "maxDuration": 60
     }
-  }
+  },
+  "redirects": [
+    { "source": "/carols", "destination": "/carols/", "permanent": false }
+  ],
+  "rewrites": [
+    { "source": "/carols/", "destination": "https://roster-carols.vercel.app/index.html" },
+    { "source": "/carols/:path+", "destination": "https://roster-carols.vercel.app/:path+" }
+  ]
 }
