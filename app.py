@@ -15,7 +15,8 @@ from pydantic import BaseModel, Field
 
 from roster_chorale import chorale as chmod
 from roster_chorale import roster as rmod
-from roster_chorale.arrange import ArrangeError, arrange, fit_report_text
+from roster_chorale.arrange import ArrangeError, KEY_SPELLINGS, arrange, fit_report_text, grade_cfg, key_lists, rank_chorales
+from roster_chorale.chorale import key_name
 from roster_chorale.instruments import ORDER
 
 ROOT = Path(__file__).resolve().parent
@@ -37,9 +38,15 @@ def health() -> dict:
 
 @app.get("/api/chorales")
 def chorales() -> dict:
+    grades = ["0.5", "1", "2", "3"]
     return {
         "instruments": ORDER,
-        "grades": ["0.5", "1", "2", "3"],
+        "grades": grades,
+        # every key, plus the band and string key lists for each grade (to sort and mark the key menu)
+        "keys": {m: [key_name(t, m) for t in KEY_SPELLINGS[m]] for m in ("major", "minor")},
+        "grade_keys": {g: {fam: {m: [key_name(t, m) for t in ts] for m, ts in
+                                 ((m, key_lists(grade_cfg(g), m)[fam]) for m in ("major", "minor"))}
+                           for fam in ("band", "strings")} for g in grades},
         "chorales": [{"id": c["id"], "bwv": c["bwv"], "title": c["title"], "key": c["key"],
                       "measures": c["measures"], "riemenschneider": c["riemenschneider"]}
                      for c in chmod.catalog()],
@@ -66,18 +73,33 @@ class ArrangeBody(BaseModel):
     chorale: str = Field(..., description="chorale id such as bwv66.6")
     grade: str = "1"
     parts: str = Field("single", description='"single" = one part per instrument, "multiple" = split sections')
+    key: str | None = Field(None, description='concert key to use, e.g. "Bb major"; omit to let the app pick')
+
+
+class SuggestBody(BaseModel):
+    roster: dict[str, int] = Field(..., description="standard instrument name -> number of players")
+    key: str = Field(..., description='concert key, e.g. "Bb major" or "G minor"')
+    grade: str = "1"
+    parts: str = "single"
+    limit: int = Field(5, ge=1, le=20)
+
+
+@app.post("/api/suggest")
+def suggest(body: SuggestBody) -> dict:
+    """The chorales that fit this roster best once transposed into the chosen key."""
+    return rank_chorales(body.roster, body.grade, body.key, body.parts, body.limit)
 
 
 @app.post("/api/arrange")
 def do_arrange(body: ArrangeBody) -> dict:
-    res = arrange(body.chorale, body.roster, body.grade, parts_mode=body.parts)
+    res = arrange(body.chorale, body.roster, body.grade, parts_mode=body.parts, key_choice=body.key)
     res["fit_report_text"] = fit_report_text(res)
     return res
 
 
 @app.post("/api/zip")
 def do_zip(body: ArrangeBody) -> Response:
-    res = arrange(body.chorale, body.roster, body.grade, parts_mode=body.parts)
+    res = arrange(body.chorale, body.roster, body.grade, parts_mode=body.parts, key_choice=body.key)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for p in res["parts"]:

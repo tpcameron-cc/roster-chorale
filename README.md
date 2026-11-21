@@ -33,7 +33,8 @@ Roster Chorale starts from **the players you have** and **the grade you're aimin
 |---|---|
 | 📋 **Reads any roster** | Upload `.xlsx`/`.csv`, paste rows from Excel or Google Sheets, or just type `Flute 9, Clarinet 5, Tuba 1`. Messy names like “Bb Clar”, “Vln 2”, “Bari” or “Snare” are cleaned up; anything unknown is listed for you to classify. |
 | 🎚️ **Targets a grade** | Grade ½, 1, 2 or 3 sets each instrument's range, the allowed concert keys, and how much the rhythm is simplified. |
-| 🔑 **Chooses the key** | Tries every allowed key, counts how many notes fall out of range for *your* roster, and explains the winner and why the runner-up lost. |
+| 🔑 **Start from a key** | Working on concert B♭ this week? Pick the key and get a shortlist of the chorales that fit *your* roster best once transposed there — the fit of each shown up front. |
+| 🎯 **…or let it choose the key** | Pick a chorale instead and it tries every allowed key, counts how many notes fall out of range for your roster, and explains the winner and why the runner-up lost. |
 | 🎻 **Voices the chorale** | Puts every instrument on soprano, alto, tenor or bass so every line is covered, the bass goes to low instruments, and no chord is turned upside down. |
 | ✂️ **One part or split sections — your call** | *One per instrument* gives every flute the same part. *Split sections* divides each section across the lines it suits — Flute 1/2, Clarinet 1/2/3, Trumpet 1/2, Violin 1/2. Either way, small groups split when needed so all four lines are heard (a clarinet quartet, a flute choir, two trumpets and a horn). |
 | 🔁 **Fits octaves by phrase** | Moves whole parts, then whole phrases (fermata to fermata) — never single notes — and rests a part for a phrase only when someone else covers it. |
@@ -46,7 +47,7 @@ Roster Chorale starts from **the players you have** and **the grade you're aimin
 Open **[roster-chorale.vercel.app](https://roster-chorale.vercel.app)**, then:
 
 1. **Add your roster.** Upload a spreadsheet, paste rows, or type it. No roster handy? Use the sample [`lopsided-band.xlsx`](samples/lopsided-band.xlsx).
-2. **Pick a chorale** by BWV number or title — or hit **🎲 Surprise me** — choose a **target grade**, and choose **one part per instrument** or **split sections**.
+2. **Start from a key** (pick a concert key and choose from the shortlist of chorales that fit) **or start from a chorale** (search by BWV number or title and let the app choose the key). Then pick a **target grade** and **one part per instrument** or **split sections**.
 3. **Arrange.** Read the key decision, see who plays what, and check the fit report.
 4. **Print all parts** (choose *Save as PDF* in the print dialog) or **Download MusicXML (.zip)**.
 5. Switch the grade from **1** to **3** and arrange again: the eighth-note passing tones come back and the octave fixes disappear.
@@ -117,6 +118,8 @@ flowchart LR
 7. **Lines in order.** Nothing sounds above the melody or below the bass: if a part has to move up an octave (say, a clarinet playing the bass line), the parts above it follow when their range allows. If it can't be avoided, the page says so.
 8. **Key score.** Fewest notes still out of range wins, then fewer octave fixes, more natural voicing, keys familiar to each section, and finally the smallest move from Bach's key. If nothing fits, you get the **least-bad** key in red, with every problem note listed by measure.
 
+**Starting from a key.** The app transposes every chorale in that mode (about 175 major or 180 minor) into your key and scores how well each fits your roster at the grade: fewest notes still out of range, then fewest octave fixes. The best six are shown with Bach's original key and the fit; arranging then uses your key exactly. If you choose a key that isn't on your grade's list, or one that leaves notes out of range, the page says so — and tells you which key would fit best. Each chorale's notes are precomputed in `data/chorale_notes.json` so ranking takes about a second.
+
 **Mixed groups.** Winds use the band key list for the grade (flat keys); strings use the string list (sharp keys). A full orchestra tries both, costs each player a little when a key is off their section's list, and tells you when one section is reading an unfamiliar key.
 
 ## 🎚️ Grades
@@ -155,7 +158,10 @@ Open <http://localhost:8321>. The first request takes a couple of seconds while 
 ```bash
 uv run python -m roster_chorale samples/lopsided-band.xlsx --chorale bwv66.6 --grade 1 --out out/
 uv run python -m roster_chorale samples/lopsided-band.xlsx --chorale bwv66.6 --grade 2 --parts multiple --out out/
+uv run python -m roster_chorale samples/lopsided-band.xlsx --chorale best --key "Eb major" --grade 2 --out out/
 ```
+
+`--key` uses that concert key; with `--chorale best` it lists the best-fitting chorales for the key and arranges the top one.
 
 Writes one MusicXML file per instrument plus `fit-report.txt`, and prints the report.
 
@@ -165,7 +171,7 @@ Writes one MusicXML file per instrument plus `fit-report.txt`, and prints the re
 uv run pytest
 ```
 
-About 400 tests cover alias mapping, roster parsing (xlsx, csv, pasted and typed), written-pitch ranges for every transposing instrument, key search, voice coverage, rhythm simplification, phrase-only octave shifts, timpani tuning, and a **musical-correctness check**: every written part is transposed back to concert pitch and compared note for note with the voice it was assigned.
+About 450 tests cover alias mapping, roster parsing (xlsx, csv, pasted and typed), written-pitch ranges for every transposing instrument, key search, voice coverage, rhythm simplification, phrase-only octave shifts, timpani tuning, and a **musical-correctness check**: every written part is transposed back to concert pitch and compared note for note with the voice it was assigned.
 
 ## 🔌 API
 
@@ -175,7 +181,8 @@ Interactive docs at [`/api/docs`](https://roster-chorale.vercel.app/api/docs).
 |---|---|---|---|
 | `GET` | `/api/chorales` | — | the 355 clean four-part chorales, instruments and grades |
 | `POST` | `/api/roster` | multipart `file` (.xlsx/.csv) **or** form field `text` | cleaned counts + unrecognised names |
-| `POST` | `/api/arrange` | `{"roster": {...}, "chorale": "bwv66.6", "grade": "1", "parts": "single"}` — `parts` is `"single"` (default) or `"multiple"` | key decision, voicing, fit report, MusicXML per part |
+| `POST` | `/api/suggest` | `{"roster": {...}, "key": "Bb major", "grade": "1", "parts": "single", "limit": 5}` | the chorales that fit best in that key, with their fit |
+| `POST` | `/api/arrange` | `{"roster": {...}, "chorale": "bwv66.6", "grade": "1", "parts": "single", "key": "G minor"}` — `parts` is `"single"` (default) or `"multiple"`; omit `key` to let the app choose | key decision, voicing, fit report, MusicXML per part |
 | `POST` | `/api/zip` | same as `/api/arrange` | `application/zip` of all parts + `fit-report.txt` |
 
 ```bash
@@ -211,6 +218,7 @@ roster_chorale/
   percussion.py             timpani and percussion parts
 data/grades.json            ranges, keys and rhythm rules per grade  <- edit me
 data/chorales.json          catalog of 355 chorales (rebuild: scripts/build_catalog.py)
+data/chorale_notes.json     precomputed notes for fast key-first ranking (rebuild: scripts/build_notes.py)
 samples/lopsided-band.xlsx  a realistic messy roster (invented first names)
 tests/                      pytest suite
 docs/                       screenshots and the original build spec

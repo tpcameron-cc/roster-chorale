@@ -610,61 +610,188 @@ def part_label(inst: Inst, part: str) -> str:
     return f"{full} {num}"
 
 
-def search_keys(ch: Chorale, counts: dict[str, int], cfg: dict, parts_mode: str = "single") -> list[KeyResult]:
-    mode = ch.key.mode if ch.key.mode in ("major", "minor") else "major"
+def evaluate_key(notes: dict[str, list[NoteRef]], mode: str, orig_tonic: str, counts: dict[str, int], cfg: dict,
+                 spelled: str, off: dict[str, int], parts_mode: str = "single") -> KeyResult:
+    """Voice and fit the roster for one concert key (tonic in music21 spelling, e.g. 'B-')."""
     rng = ranges_midi(cfg)
-    notes = {v: voice_notes(ch, v) for v in VOICES}
     n_phrases = max((n.phrase for v in VOICES for n in notes[v]), default=0) + 1
-    orig = ch.key.tonic.name
     mean = {v: sum(n.midi for n in notes[v]) / max(len(notes[v]), 1) for v in VOICES}
-    results = []
-    for spelled, off in candidate_keys(counts, cfg, mode):
-        semis = key_interval(orig, spelled).semitones
-        fits: dict[tuple[str, str], Fit] = {}
-        cost: dict[tuple[str, str], float] = {}
-        below: set[tuple[str, str]] = set()
-        for name in counts:
-            inst = INSTRUMENTS[name]
-            lo, hi = rng[name]
-            for v in VOICES:
-                f = fit(notes[v], semis + inst.written_semitones, lo, hi)
-                fits[name, v] = f
-                cost[name, v] = f.cost + pref_cost(inst, v)
-                if v != "B" and mean[v] + 12 * f.octave < mean["B"] + BELOW_BASS_MARGIN:
-                    cost[name, v] += COST_BELOW_BASS
-                    below.add((name, v))
-        best_opt = None
-        for parts in split_options(counts, parts_mode):
-            inst_of = {pt: i for pt, (i, _) in parts.items()}
-            pc = {pt: n for pt, (_, n) in parts.items()}
-            cost_p = {(pt, v): cost[i, v] for pt, i in inst_of.items() for v in VOICES}
-            fits_p = {(pt, v): fits[i, v] for pt, i in inst_of.items() for v in VOICES}
-            real_bass = {pt: fits[i, "B"].octave <= 0 for pt, i in inst_of.items()}
-            below_p = {(pt, v) for pt, i in inst_of.items() for v in VOICES if (i, v) in below}
-            natural = parts_mode == "multiple" and any(pt != i for pt, i in inst_of.items())
-            try:
-                assign, total = assign_voices(cost_p, fits_p, pc, n_phrases, real_bass, inst_of, mean, below_p,
-                                              natural_lines=natural)
-            except AssertionError:      # no voicing keeps every section on its natural lines
-                assign, total = assign_voices(cost_p, fits_p, pc, n_phrases, real_bass, inst_of, mean, below_p)
-            if parts_mode == "multiple" and all(pt == i for pt, i in inst_of.items()) and best_opt is not None:
-                continue                # the unsplit fallback only counts if splitting found nothing
-            if best_opt is None or total < best_opt[1]:
-                best_opt = (assign, total, inst_of, pc)
-        assign, total, inst_of, pc = best_opt
-        assign, inst_of, pc = _number_parts(assign, inst_of, pc)
-        fits_p = {(pt, v): fits[inst_of[pt], v] for pt in assign for v in VOICES}
-        _keep_melody_on_top(assign, fits_p, inst_of, notes, mean, semis, rng)
-        _, tacet, _ = phrase_plan(assign, fits_p, n_phrases)
-        chosen = {}
-        for pt, v in assign.items():
-            f = fits_p[pt, v]
-            chosen[pt] = Fit(f.octave, f.phrase_shifts, f.pre_out, f.pre_above, f.pre_below, f.bad, tacet[pt])
-        total += COST_KEY_MOVE * abs(semis) + COST_KEY_FAMILY * sum(off.values())
-        inverted = {pt for pt, v in assign.items() if (inst_of[pt], v) in below} | inversions(assign, fits_p, mean)
-        results.append(KeyResult(spelled, mode, semis, assign, chosen, total, off, len(inverted), inst_of, pc))
+    semis = key_interval(orig_tonic, spelled).semitones
+    fits: dict[tuple[str, str], Fit] = {}
+    cost: dict[tuple[str, str], float] = {}
+    below: set[tuple[str, str]] = set()
+    for name in counts:
+        inst = INSTRUMENTS[name]
+        lo, hi = rng[name]
+        for v in VOICES:
+            f = fit(notes[v], semis + inst.written_semitones, lo, hi)
+            fits[name, v] = f
+            cost[name, v] = f.cost + pref_cost(inst, v)
+            if v != "B" and mean[v] + 12 * f.octave < mean["B"] + BELOW_BASS_MARGIN:
+                cost[name, v] += COST_BELOW_BASS
+                below.add((name, v))
+    best_opt = None
+    for parts in split_options(counts, parts_mode):
+        inst_of = {pt: i for pt, (i, _) in parts.items()}
+        pc = {pt: n for pt, (_, n) in parts.items()}
+        cost_p = {(pt, v): cost[i, v] for pt, i in inst_of.items() for v in VOICES}
+        fits_p = {(pt, v): fits[i, v] for pt, i in inst_of.items() for v in VOICES}
+        real_bass = {pt: fits[i, "B"].octave <= 0 for pt, i in inst_of.items()}
+        below_p = {(pt, v) for pt, i in inst_of.items() for v in VOICES if (i, v) in below}
+        natural = parts_mode == "multiple" and any(pt != i for pt, i in inst_of.items())
+        try:
+            assign, total = assign_voices(cost_p, fits_p, pc, n_phrases, real_bass, inst_of, mean, below_p,
+                                          natural_lines=natural)
+        except AssertionError:      # no voicing keeps every section on its natural lines
+            assign, total = assign_voices(cost_p, fits_p, pc, n_phrases, real_bass, inst_of, mean, below_p)
+        if parts_mode == "multiple" and all(pt == i for pt, i in inst_of.items()) and best_opt is not None:
+            continue                # the unsplit fallback only counts if splitting found nothing
+        if best_opt is None or total < best_opt[1]:
+            best_opt = (assign, total, inst_of, pc)
+    assign, total, inst_of, pc = best_opt
+    assign, inst_of, pc = _number_parts(assign, inst_of, pc)
+    fits_p = {(pt, v): fits[inst_of[pt], v] for pt in assign for v in VOICES}
+    _keep_melody_on_top(assign, fits_p, inst_of, notes, mean, semis, rng)
+    _, tacet, _ = phrase_plan(assign, fits_p, n_phrases)
+    chosen = {}
+    for pt, v in assign.items():
+        f = fits_p[pt, v]
+        chosen[pt] = Fit(f.octave, f.phrase_shifts, f.pre_out, f.pre_above, f.pre_below, f.bad, tacet[pt])
+    total += COST_KEY_MOVE * abs(semis) + COST_KEY_FAMILY * sum(off.values())
+    inverted = {pt for pt, v in assign.items() if (inst_of[pt], v) in below} | inversions(assign, fits_p, mean)
+    return KeyResult(spelled, mode, semis, assign, chosen, total, off, len(inverted), inst_of, pc)
+
+
+def chorale_mode(ch: Chorale) -> str:
+    return ch.key.mode if ch.key.mode in ("major", "minor") else "major"
+
+
+def search_keys(ch: Chorale, counts: dict[str, int], cfg: dict, parts_mode: str = "single") -> list[KeyResult]:
+    """Try every concert key the grade allows for this roster; best first."""
+    mode = chorale_mode(ch)
+    notes = {v: voice_notes(ch, v) for v in VOICES}
+    results = [evaluate_key(notes, mode, ch.key.tonic.name, counts, cfg, spelled, off, parts_mode)
+               for spelled, off in candidate_keys(counts, cfg, mode)]
     results.sort(key=lambda r: r.rank)
     return results
+
+
+def off_list_for(tonic: str, mode: str, counts: dict[str, int], cfg: dict) -> dict[str, int]:
+    """Players (by family) for whom this key isn't on their grade's key list."""
+    lists = key_lists(cfg, mode)
+    pc = int(pitch.Pitch(tonic).ps) % 12
+    out = {}
+    for fam, keys in lists.items():
+        n = sum(c for i, c in counts.items() if INSTRUMENTS[i].family == fam)
+        if n and pc not in {int(pitch.Pitch(t).ps) % 12 for t in keys}:
+            out[fam] = n
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Picking a key first: parse it, and rank chorales that suit it
+# ---------------------------------------------------------------------------
+KEY_SPELLINGS = {
+    "major": ["C", "D-", "D", "E-", "E", "F", "F#", "G", "A-", "A", "B-", "B"],
+    "minor": ["C", "C#", "D", "E-", "E", "F", "F#", "G", "G#", "A", "B-", "B"],
+}
+
+
+def parse_key(text: str) -> tuple[str, str]:
+    """'Bb major', 'B- major', 'f# minor', 'G' -> (music21 tonic, mode)."""
+    parts = (text or "").strip().split()
+    if not parts:
+        raise ArrangeError("Pick a concert key, like Bb major or G minor.")
+    tonic = parts[0]
+    mode = parts[1].lower() if len(parts) > 1 else ("minor" if tonic[0].islower() else "major")
+    if mode not in ("major", "minor"):
+        raise ArrangeError(f"Unknown key {text!r}: say major or minor, like 'Bb major'.")
+    t = tonic[0].upper() + tonic[1:].replace("b", "-").replace("\u266d", "-").replace("\u266f", "#")
+    try:
+        p = pitch.Pitch(t)
+    except Exception:  # noqa: BLE001
+        raise ArrangeError(f"Unknown key {text!r}.") from None
+    # prefer the conventional spelling for that pitch (A# major -> Bb major)
+    pc = int(p.ps) % 12
+    spelled = next(x for x in KEY_SPELLINGS[mode] if int(pitch.Pitch(x).ps) % 12 == pc)
+    return (t if t in KEY_SPELLINGS[mode] else spelled), mode
+
+
+@lru_cache(maxsize=1)
+def _notes_data() -> dict:
+    return json.loads((DATA / "chorale_notes.json").read_text(encoding="utf-8"))
+
+
+def rhythm_id(rule: dict | None) -> str:
+    if not rule:
+        return "as_written"
+    return "quarters" if float(rule["grid"]) == 1.0 else "eighths"
+
+
+def _stored_notes(entry: dict) -> dict[str, list[NoteRef]]:
+    out = {}
+    for v in VOICES:
+        flat = entry["v"][v]
+        out[v] = [NoteRef(0, "", flat[k], flat[k + 1], "") for k in range(0, len(flat), 2)]
+    return out
+
+
+RANK_PREFILTER = 30
+
+
+def rank_chorales(counts: dict[str, int], grade: str | float, key_text: str, parts_mode: str = "single",
+                  limit: int = 5) -> dict:
+    """Chorales (in the key's mode) that fit this roster best once transposed to the chosen key."""
+    cfg = grade_cfg(grade)
+    tonic, mode = parse_key(key_text)
+    counts = {k: int(v) for k, v in counts.items() if k in INSTRUMENTS and int(v) > 0}
+    voice_counts = {k: n for k, n in counts.items() if INSTRUMENTS[k].pitched_voice}
+    if not voice_counts:
+        raise ArrangeError("Add at least one instrument that plays the chorale (winds, brass, strings or mallets).")
+    data = _notes_data()[rhythm_id(cfg["rhythm"])]
+    rng = ranges_midi(cfg)
+    off = off_list_for(tonic, mode, voice_counts, cfg)
+
+    # 1) quick score for every chorale: notes out of range if each instrument took its best line
+    quick = []
+    for cid, entry in data.items():
+        if entry["mode"] != mode:
+            continue
+        notes = _stored_notes(entry)
+        semis = key_interval(entry["tonic"], tonic).semitones
+        score = 0.0
+        for name in voice_counts:
+            inst = INSTRUMENTS[name]
+            lo, hi = rng[name]
+            best_line = float("inf")
+            for v in VOICES:
+                f = fit(notes[v], semis + inst.written_semitones, lo, hi)
+                best_line = min(best_line, f.cost + COST_RESIDUAL * sum(len(b) for b in f.bad.values())
+                                + pref_cost(inst, v))
+            score += best_line
+        quick.append((score, cid, entry, notes))
+    quick.sort(key=lambda x: (x[0], x[1]))
+
+    # 2) full voicing for the most promising ones
+    meta = {c["id"]: c for c in chmod.catalog()}
+    scored = []
+    for _, cid, entry, notes in quick[:RANK_PREFILTER]:
+        kr = evaluate_key(notes, mode, entry["tonic"], voice_counts, cfg, tonic, off, parts_mode)
+        scored.append((kr.rank, cid, kr))
+    # cleanest first: fewest notes still out of range (and no upside-down chords), then fewest fixes
+    scored.sort(key=lambda x: (x[0][0], x[2].n_shifts + x[2].n_tacet, x[2].pre_out, x[0][1], x[1]))
+    out = []
+    for _, cid, kr in scored[:limit]:
+        m = meta[cid]
+        out.append({
+            "id": cid, "bwv": m["bwv"], "title": m["title"], "original_key": m["key"], "measures": m["measures"],
+            "out_of_range": kr.residual, "phrase_shifts": kr.n_shifts, "rests": kr.n_tacet,
+            "out_before_phrase_shifts": kr.pre_out,
+            "fit": _fit_phrase(kr),
+        })
+    return {"key": key_name(tonic, mode), "tonic": tonic, "mode": mode, "grade": str(grade),
+            "candidates": sum(1 for e in data.values() if e["mode"] == mode), "shortlist": out,
+            "off_list": off}
 
 
 # ---------------------------------------------------------------------------
@@ -845,9 +972,11 @@ def safe_filename(s: str) -> str:
 # The whole job
 # ---------------------------------------------------------------------------
 def arrange(chorale_id: str, counts: dict[str, int], grade: str | float, with_parts: bool = True,
-            parts_mode: str = "single") -> dict:
+            parts_mode: str = "single", key_choice: str | None = None) -> dict:
     """parts_mode: "single" = one part per instrument (sections split only when needed to cover
-    all four lines); "multiple" = sections split into numbered parts (Flute 1, Flute 2...)."""
+    all four lines); "multiple" = sections split into numbered parts (Flute 1, Flute 2...).
+
+    key_choice: a concert key to use as-is ("Bb major"); None lets the app pick the best-fitting key."""
     cfg = grade_cfg(grade)
     if parts_mode not in PARTS_MODES:
         raise ArrangeError(f"Unknown parts option {parts_mode!r}; use 'single' or 'multiple'.")
@@ -870,8 +999,29 @@ def arrange(chorale_id: str, counts: dict[str, int], grade: str | float, with_pa
     original = chmod.load(meta["id"])
     ch, rhythm = chmod.simplify(original, cfg["rhythm"])
     results = search_keys(ch, counts, cfg, parts_mode)
-    best = results[0]
-    short, long = explain(results, ch, cfg)
+    chosen_key = bool(key_choice and key_choice.strip())
+    if chosen_key:
+        tonic, kmode = parse_key(key_choice)
+        if kmode != chorale_mode(ch):
+            raise ArrangeError(f"BWV {meta['bwv']} is in a {chorale_mode(ch)} key ({ch.key_name}); pick a "
+                               f"{chorale_mode(ch)} key for it, or let the app choose the key.")
+        notes_ = {v: voice_notes(ch, v) for v in VOICES}
+        forced = evaluate_key(notes_, kmode, ch.key.tonic.name, counts, cfg, tonic,
+                              off_list_for(tonic, kmode, counts, cfg), parts_mode)
+        auto_best = results[0]
+        results = [forced] + [r for r in results if r.name != forced.name]
+        best = forced
+        short = f"Concert {forced.name} (your choice): {_fit_phrase(forced)}."
+        if forced.name == ch.key_name:
+            long = f"You chose concert {forced.name}, Bach's own key: {_fit_phrase(forced)}."
+        else:
+            long = f"Bach wrote this in {ch.key_name}. You chose concert {forced.name}: {_fit_phrase(forced)}."
+        if auto_best.name != forced.name and auto_best.rank < forced.rank:
+            long += (f" For this band at {cfg['label'].lower()}, the best-fitting key would be concert "
+                     f"{auto_best.name} ({_fit_phrase(auto_best)}).")
+    else:
+        best = results[0]
+        short, long = explain(results, ch, cfg)
 
     warnings: list[str] = []
     notes: list[str] = []
@@ -915,6 +1065,10 @@ def arrange(chorale_id: str, counts: dict[str, int], grade: str | float, with_pa
         lists = key_lists(cfg, best.mode)
         for fam, n in best.off_list.items():
             other = [f for f in lists if f != fam and f not in best.off_list]
+            if chosen_key:
+                warnings.append(f"Concert {best.name} isn't on the {cfg['label']} {fam_word[fam]} key list, so your "
+                                f"{_plural(n, fam_word[fam] + ' player')} will be reading a less familiar key.")
+                continue
             warnings.append(f"Concert {best.name} isn't on the {cfg['label']} {fam_word[fam]} key list, so your "
                             f"{_plural(n, fam_word[fam] + ' player')} read a less familiar key. It was chosen because it suits "
                             f"the {' and '.join(fam_word[f] for f in other) or 'rest of the'} players and keeps everyone in range."
@@ -927,9 +1081,14 @@ def arrange(chorale_id: str, counts: dict[str, int], grade: str | float, with_pa
                 notes_txt.append(f"{name} m. {n.measure}: written {pitch_label(pitch.Pitch(w))} ({d} "
                                  f"{pitch_label(rg[1] if d == 'above' else rg[0])})")
         shown = "; ".join(notes_txt[:4]) + ("; …" if len(notes_txt) > 4 else "")
-        warnings.append(f"No allowed key keeps every note inside the {cfg['label']} ranges. Concert {best.name} is the "
-                        f"least-bad option: {_plural(best.residual, 'note')} still out of range ({shown}). "
-                        f"Check these with the player, or widen that range in data/grades.json.")
+        if chosen_key:
+            warnings.append(f"In concert {best.name}, {_plural(best.residual, 'note')} stay out of the {cfg['label']} "
+                            f"ranges ({shown}). Try another chorale from the shortlist, another key, or let the app "
+                            f"choose the key.")
+        else:
+            warnings.append(f"No allowed key keeps every note inside the {cfg['label']} ranges. Concert {best.name} is the "
+                            f"least-bad option: {_plural(best.residual, 'note')} still out of range ({shown}). "
+                            f"Check these with the player, or widen that range in data/grades.json.")
 
     key_iv = key_interval(ch.key.tonic.name, best.tonic)
     for r in rhythm:   # name pitches in the chosen concert key
@@ -1034,6 +1193,7 @@ def arrange(chorale_id: str, counts: dict[str, int], grade: str | float, with_pa
         "parts_mode": parts_mode,
         "key": {**key_row(best), "concert": best.name, "transpose_semitones": best.semitones},
         "runner_up": key_row(results[1]) if len(results) > 1 else None,
+        "key_choice": "chosen" if chosen_key else "best_fit",
         "keys_considered": [key_row(r) for r in results],
         "summary": short,
         "explanation": long,

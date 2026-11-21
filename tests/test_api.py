@@ -63,3 +63,14 @@ def test_arrange_split_sections_via_api():
     assert "Flute 1" in names and "Flute 2" in names and "Trumpet 1 in Bb" in names and "Trombone 2" in names
     z = client.post("/api/zip", json=body)
     assert len(zipfile.ZipFile(io.BytesIO(z.content)).namelist()) == len(d["parts"]) + 1
+
+
+def test_suggest_and_arrange_in_a_chosen_key():
+    sl = client.post("/api/suggest", json={"roster": LOPSIDED, "key": "Bb major", "grade": "1", "limit": 3}).json()
+    assert len(sl["shortlist"]) == 3 and sl["key"] == "Bb major"
+    cid = sl["shortlist"][0]["id"]
+    d = client.post("/api/arrange", json={"roster": LOPSIDED, "chorale": cid, "grade": "1", "key": "Bb major"}).json()
+    assert d["key"]["concert"] == "Bb major" and d["key_choice"] == "chosen"
+    keys = client.get("/api/chorales").json()
+    assert "Bb major" in keys["keys"]["major"] and "Bb major" in keys["grade_keys"]["1"]["band"]["major"]
+    assert client.post("/api/suggest", json={"roster": LOPSIDED, "key": "H major"}).status_code == 400

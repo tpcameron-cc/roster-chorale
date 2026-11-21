@@ -88,6 +88,18 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .list button[aria-selected=true] { background: var(--accent-soft); font-weight: 600; }
 .list .k { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .chosen { margin-top: 10px; font-size: 14px; }
+.tabs { display: flex; gap: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin-bottom: 14px; }
+.tabs button { flex: 1; border: 0; border-radius: 0; background: var(--bg); font-weight: 600; padding: 10px 8px; justify-content: center; flex-direction: column; gap: 0; }
+.tabs button .sub2 { font-weight: 400; font-size: 12px; color: var(--muted); }
+.tabs button[aria-selected=true] { background: var(--accent); color: var(--accent-ink); }
+.tabs button[aria-selected=true] .sub2 { color: var(--accent-ink); opacity: .85; }
+#key-select { width: auto; min-width: 200px; }
+.shortlist button { flex-direction: column; align-items: flex-start; gap: 2px; }
+.shortlist .t { font-weight: 600; }
+.shortlist .f { font-size: 12px; color: var(--muted); }
+.shortlist .f.ok { color: var(--good); }
+.shortlist .f.bad { color: var(--bad); }
+.shortlist-status { font-size: 13px; color: var(--muted); margin-top: 8px; min-height: 1.4em; }
 .grades { display: flex; gap: 6px; }
 .grades label { flex: 1; }
 .grades input { position: absolute; opacity: 0; pointer-events: none; }
@@ -203,16 +215,32 @@ footer { color: var(--muted); font-size: 13px; padding: 10px 0 40px; }
 
   <!-- STEP 2: CHORALE + GRADE -->
   <section class="card">
-    <h2><span class="step">Step 2</span> Chorale and grade</h2>
+    <h2><span class="step">Step 2</span> Key, chorale and grade</h2>
     <div class="picker" style="margin-top:12px">
       <div>
-        <label class="lbl" for="search">Find a chorale (BWV number or title)</label>
-        <div class="row">
-          <input type="search" id="search" placeholder="e.g. 66.6 or Nun danket" style="flex:1;min-width:180px" autocomplete="off">
-          <button id="surprise" title="Pick a random chorale">🎲 Surprise me</button>
+        <div class="tabs" role="tablist" aria-label="How to choose">
+          <button role="tab" id="tab-key" data-mode="key" aria-selected="true">Start from a key<span class="sub2">you pick the key, I find chorales that fit</span></button>
+          <button role="tab" id="tab-chorale" data-mode="chorale" aria-selected="false">Start from a chorale<span class="sub2">you pick the chorale, I pick the best key</span></button>
         </div>
-        <div class="list" id="list" role="listbox" aria-label="Chorales"></div>
-        <div class="chosen" id="chosen"></div>
+        <div id="mode-key">
+          <label class="lbl" for="key-select">Concert key</label>
+          <div class="row">
+            <select id="key-select"></select>
+            <button id="surprise-key" title="Pick a random chorale from the good fits">🎲 Surprise me</button>
+          </div>
+          <div class="shortlist-status" id="shortlist-status" aria-live="polite"></div>
+          <div class="list shortlist" id="shortlist" role="listbox" aria-label="Chorales that fit this key"></div>
+          <div class="chosen" id="chosen-key"></div>
+        </div>
+        <div id="mode-chorale" class="hidden">
+          <label class="lbl" for="search">Find a chorale (BWV number or title)</label>
+          <div class="row">
+            <input type="search" id="search" placeholder="e.g. 66.6 or Nun danket" style="flex:1;min-width:180px" autocomplete="off">
+            <button id="surprise" title="Pick a random chorale">🎲 Surprise me</button>
+          </div>
+          <div class="list" id="list" role="listbox" aria-label="Chorales"></div>
+          <div class="chosen" id="chosen"></div>
+        </div>
       </div>
       <div>
         <label class="lbl">Target grade</label>
@@ -301,6 +329,11 @@ const state = {
   chorale: LS.get("chorale", "bwv66.6"),
   grade: LS.get("grade", "1"),
   parts: LS.get("parts", "single"),
+  pickMode: LS.get("pickMode", "key"),     // "key": pick a key, rank chorales; "chorale": pick a chorale, best key
+  key: LS.get("key", ""),                  // e.g. "Bb major"
+  keyChorale: null,                        // chorale chosen from the shortlist
+  shortlist: [],
+  keys: null, gradeKeys: null,
   result: null,
   lastBody: null,   // the request that produced `result`, reused for the zip download
 };
@@ -325,8 +358,9 @@ async function warmUp() {
       setStatus("warm", attempt === 1 ? "Warming up the arranger…" : "Still warming up (the first request loads the Bach corpus)…");
       const d = await api("/api/chorales");
       state.instruments = d.instruments; state.chorales = d.chorales;
+      state.keys = d.keys; state.gradeKeys = d.grade_keys;
       setStatus("ok", `Ready: ${d.chorales.length} Bach chorales`);
-      initPicker(); initAddInst(); renderRoster(); updateArrangeBtn();
+      initPicker(); initAddInst(); buildKeyMenu(); setPickMode(state.pickMode); renderRoster(); updateArrangeBtn();
       return;
     } catch (e) { if (attempt === 3) setStatus("err", "Couldn't reach the arranger. Reload to try again. (" + e.message + ")"); }
   }
@@ -372,6 +406,7 @@ function effectiveCounts() {
   return ordered;
 }
 function renderRoster() {
+  inputsChanged();
   const r = state.roster;
   if (!r || !state.instruments.length) return;
   $("#roster-out").classList.remove("hidden");
@@ -442,20 +477,115 @@ function initPicker() {
 }
 document.querySelectorAll('input[name=parts]').forEach((r) => {
   r.checked = r.value === state.parts;
-  r.addEventListener("change", () => { state.parts = r.value; LS.set("parts", r.value); });
+  r.addEventListener("change", () => { state.parts = r.value; LS.set("parts", r.value); inputsChanged(); });
 });
 document.querySelectorAll('input[name=grade]').forEach((r) => {
   r.checked = r.value === state.grade;
-  r.addEventListener("change", () => { state.grade = r.value; LS.set("grade", r.value); });
+  r.addEventListener("change", () => { state.grade = r.value; LS.set("grade", r.value); buildKeyMenu(); inputsChanged(); });
+});
+
+// ---------- start from a key ----------
+function majorityFamily() {
+  const c = effectiveCounts(); const STR = ["Violin", "Viola", "Cello", "Double Bass"];
+  let strings = 0, other = 0;
+  for (const [k, n] of Object.entries(c)) (STR.includes(k) ? (strings += n) : (other += n));
+  return strings > other ? "strings" : "band";
+}
+function buildKeyMenu() {
+  if (!state.keys) return;
+  const gk = state.gradeKeys[state.grade];
+  const first = majorityFamily(), second = first === "band" ? "strings" : "band";
+  const famName = { band: "winds & brass", strings: "strings" };
+  const gradeLabel = state.grade === "0.5" ? "½" : state.grade;
+  const listed = new Set();
+  let html = "";
+  for (const fam of [first, second]) {
+    const ks = [...gk[fam].major, ...gk[fam].minor].filter((k) => !listed.has(k));
+    ks.forEach((k) => listed.add(k));
+    if (ks.length) html += `<optgroup label="Grade ${gradeLabel} keys for ${famName[fam]}">${ks.map((k) => `<option>${esc(k)}</option>`).join("")}</optgroup>`;
+  }
+  const rest = [...state.keys.major, ...state.keys.minor].filter((k) => !listed.has(k));
+  html += `<optgroup label="Other keys (harder at this grade)">${rest.map((k) => `<option>${esc(k)}</option>`).join("")}</optgroup>`;
+  const sel = $("#key-select");
+  sel.innerHTML = html;
+  if (!state.key || ![...state.keys.major, ...state.keys.minor].includes(state.key)) state.key = gk[first].major[0];
+  sel.value = state.key;
+}
+$("#key-select").addEventListener("change", (e) => { state.key = e.target.value; LS.set("key", state.key); inputsChanged(); });
+function setPickMode(mode) {
+  state.pickMode = mode; LS.set("pickMode", mode);
+  $("#tab-key").setAttribute("aria-selected", String(mode === "key"));
+  $("#tab-chorale").setAttribute("aria-selected", String(mode === "chorale"));
+  $("#mode-key").classList.toggle("hidden", mode !== "key");
+  $("#mode-chorale").classList.toggle("hidden", mode !== "chorale");
+  inputsChanged(); updateArrangeBtn();
+}
+document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => setPickMode(b.dataset.mode)));
+
+let shortlistTimer = null, shortlistSeq = 0;
+function inputsChanged() {
+  if (state.pickMode !== "key" || !state.keys) return;
+  clearTimeout(shortlistTimer);
+  shortlistTimer = setTimeout(refreshShortlist, 350);
+}
+async function refreshShortlist() {
+  const roster = effectiveCounts();
+  if (!Object.keys(roster).length) {
+    state.shortlist = []; state.keyChorale = null; renderShortlist();
+    $("#shortlist-status").textContent = "Add a roster first, then I'll find chorales that fit this key.";
+    updateArrangeBtn(); return;
+  }
+  const seq = ++shortlistSeq;
+  $("#shortlist-status").innerHTML = `<span class="spinner"></span> Finding chorales that fit concert ${esc(state.key)}…`;
+  try {
+    const d = await api("/api/suggest", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ roster, key: state.key, grade: state.grade, parts: state.parts, limit: 6 }) });
+    if (seq !== shortlistSeq) return;            // a newer request is on its way
+    state.shortlist = d.shortlist;
+    if (!state.shortlist.some((c) => c.id === state.keyChorale)) state.keyChorale = state.shortlist[0]?.id || null;
+    const offList = Object.keys(d.off_list || {}).length;
+    $("#shortlist-status").textContent = `Best of ${d.candidates} ${d.mode} chorales, transposed to concert ${d.key}.`
+      + (offList ? " This key isn't on the grade list for some of your players." : "");
+    renderShortlist();
+  } catch (e) {
+    if (seq !== shortlistSeq) return;
+    state.shortlist = []; state.keyChorale = null; renderShortlist();
+    $("#shortlist-status").textContent = e.message;
+  }
+  updateArrangeBtn();
+}
+function renderShortlist() {
+  $("#shortlist").innerHTML = state.shortlist.map((c) => {
+    const cls = c.out_of_range ? "bad" : (c.out_before_phrase_shifts ? "" : "ok");
+    return `<button role="option" aria-selected="${c.id === state.keyChorale}" data-id="${esc(c.id)}">
+      <span class="t">${esc(c.title)}</span>
+      <span class="small muted">BWV ${esc(c.bwv)} · Bach's key ${esc(c.original_key)} · ${c.measures} bars</span>
+      <span class="f ${cls}">${esc(c.fit[0].toUpperCase() + c.fit.slice(1))}</span></button>`;
+  }).join("");
+  $("#shortlist").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => chooseFromShortlist(b.dataset.id)));
+  const c = state.shortlist.find((x) => x.id === state.keyChorale);
+  $("#chosen-key").innerHTML = c ? `Chosen: <strong>${esc(c.title)}</strong> <span class="muted">(BWV ${esc(c.bwv)}) in concert ${esc(state.key)}</span>` : "";
+}
+function chooseFromShortlist(id) { state.keyChorale = id; renderShortlist(); updateArrangeBtn(); }
+$("#surprise-key").addEventListener("click", () => {
+  if (!state.shortlist.length) return;
+  const clean = state.shortlist.filter((c) => !c.out_of_range);
+  const pool = clean.length ? clean : state.shortlist;
+  chooseFromShortlist(pool[Math.floor(Math.random() * pool.length)].id);
 });
 function updateArrangeBtn() {
   const n = Object.keys(effectiveCounts()).length;
-  $("#arrange").disabled = !(n && state.chorale && state.chorales.length);
-  $("#arrange-msg").textContent = n ? "" : "Add a roster first.";
+  const picked = state.pickMode === "key" ? state.keyChorale : state.chorale;
+  $("#arrange").disabled = !(n && picked && state.chorales.length);
+  $("#arrange-msg").textContent = !n ? "Add a roster first." : (picked ? "" : "Pick a chorale from the list.");
 }
 
 // ---------- arrange ----------
-function body() { return JSON.stringify({ roster: effectiveCounts(), chorale: state.chorale, grade: state.grade, parts: state.parts }); }
+function body() {
+  const byKey = state.pickMode === "key";
+  return JSON.stringify({ roster: effectiveCounts(), chorale: byKey ? state.keyChorale : state.chorale,
+    grade: state.grade, parts: state.parts, key: byKey ? state.key : null });
+}
 $("#arrange").addEventListener("click", async () => {
   const btn = $("#arrange");
   btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> Arranging…`;
@@ -478,7 +608,7 @@ $("#arrange").addEventListener("click", async () => {
 function renderResult(r) {
   $("#result").classList.remove("hidden");
   $("#keybig").classList.toggle("bad", r.least_bad);
-  $("#keybig .lab").textContent = r.least_bad ? "Least-bad key" : "Concert key";
+  $("#keybig .lab").textContent = r.key_choice === "chosen" ? "Your key" : (r.least_bad ? "Least-bad key" : "Concert key");
   $("#key-name").textContent = r.key.concert;
   $("#key-orig").textContent = `Bach: ${r.chorale.original_key}`;
   $("#summary").textContent = r.summary;

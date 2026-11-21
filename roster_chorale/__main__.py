@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from . import roster as rmod
-from .arrange import arrange, fit_report_text
+from .arrange import arrange, fit_report_text, rank_chorales
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -16,8 +16,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--grade", default="1", choices=["0.5", "1", "2", "3"])
     ap.add_argument("--parts", default="single", choices=["single", "multiple"],
                     help="single: one part per instrument; multiple: split sections (Flute 1, Flute 2...)")
+    ap.add_argument("--key", default=None,
+                    help='concert key to use, e.g. "Bb major" (default: pick the best-fitting key). '
+                         'With --chorale best, picks the best-fitting chorale for that key.')
     ap.add_argument("--out", default="out", help="output folder")
     a = ap.parse_args(argv)
+    sys.stdout.reconfigure(encoding="utf-8")
 
     path = Path(a.roster)
     r = rmod.parse_upload(path.name, path.read_bytes())
@@ -25,7 +29,14 @@ def main(argv: list[str] | None = None) -> int:
     if r.unrecognized:
         print("Unrecognised (left out):", ", ".join(f"{k} x{v}" for k, v in r.unrecognized.items()))
 
-    res = arrange(a.chorale, r.ordered_counts(), a.grade, parts_mode=a.parts)
+    chorale_id = a.chorale
+    if a.key and a.chorale == "best":
+        sl = rank_chorales(r.ordered_counts(), a.grade, a.key, a.parts)
+        print(f"Best chorales in concert {sl['key']}:")
+        for c in sl["shortlist"]:
+            print(f"  BWV {c['bwv']:<10} {c['title'][:40]:<40} {c['fit']}")
+        chorale_id = sl["shortlist"][0]["id"]
+    res = arrange(chorale_id, r.ordered_counts(), a.grade, parts_mode=a.parts, key_choice=a.key)
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     for p in res["parts"]:
