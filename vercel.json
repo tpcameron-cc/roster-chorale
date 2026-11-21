@@ -10,6 +10,7 @@
     { "source": "/carols", "destination": "/carols/", "permanent": false }
   ],
   "rewrites": [
-    { "source": "/carols/:path*", "destination": "https://roster-carols.vercel.app/:path*" }
+    { "source": "/carols/", "destination": "https://roster-carols.vercel.app/index.html" },
+    { "source": "/carols/:path+", "destination": "https://roster-carols.vercel.app/:path+" }
   ]
 }
