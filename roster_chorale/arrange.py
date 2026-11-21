@@ -108,9 +108,17 @@ class Fit:
     # notes still out of range after phrase shifts, by phrase: (note, written midi, "above"/"below")
     bad: dict[int, list[tuple[NoteRef, int, str]]] = field(default_factory=dict)
     tacet: set[int] = field(default_factory=set)   # phrases this part rests (decided with the whole band)
+    phrases: int = 1                     # how many phrases the line has
 
     def shift_for(self, phrase: int) -> int:
         return self.octave + self.phrase_shifts.get(phrase, 0)
+
+    @property
+    def level(self) -> float:
+        """Where the part actually sounds, in octaves: the whole-part shift plus the phrase
+        shifts averaged over the line (a part 'as written' with every phrase down an octave
+        sounds an octave down)."""
+        return self.octave + sum(self.phrase_shifts.values()) / max(self.phrases, 1)
 
     @property
     def residual(self) -> int:
@@ -177,7 +185,8 @@ def fit(notes: list[NoteRef], base: int, lo: int, hi: int, octave: int | None = 
         d = out(n, sh)
         if d:
             bad.setdefault(n.phrase, []).append((n, n.midi + base + 12 * sh, "above" if d > 0 else "below"))
-    return Fit(o, phrase_shifts, len(pre), pre_above, len(pre) - pre_above, bad)
+    return Fit(o, phrase_shifts, len(pre), pre_above, len(pre) - pre_above, bad,
+               phrases=len({n.phrase for n in notes}) or 1)
 
 
 # ---------------------------------------------------------------------------
@@ -246,8 +255,8 @@ def inversions(a: dict[str, str], fits: dict[tuple[str, str], Fit], means: dict[
     bass = [i for i, v in a.items() if v == "B"]
     if not bass or not means:
         return set()
-    low = min(means["B"] + 12 * fits[i, "B"].octave for i in bass)
-    return {i for i, v in a.items() if v != "B" and means[v] + 12 * fits[i, v].octave < low + BELOW_BASS_MARGIN}
+    low = min(means["B"] + 12 * fits[i, "B"].level for i in bass)
+    return {i for i, v in a.items() if v != "B" and means[v] + 12 * fits[i, v].level < low + BELOW_BASS_MARGIN}
 
 
 def over_melody(a: dict[str, str], fits: dict[tuple[str, str], Fit], means: dict[str, float]) -> set[str]:
@@ -255,8 +264,8 @@ def over_melody(a: dict[str, str], fits: dict[tuple[str, str], Fit], means: dict
     sop = [i for i, v in a.items() if v == "S"]
     if not sop or not means:
         return set()
-    top = max(means["S"] + 12 * fits[i, "S"].octave for i in sop)
-    return {i for i, v in a.items() if v in ("A", "T") and means[v] + 12 * fits[i, v].octave > top}
+    top = max(means["S"] + 12 * fits[i, "S"].level for i in sop)
+    return {i for i, v in a.items() if v in ("A", "T") and means[v] + 12 * fits[i, v].level > top}
 
 
 def assign_voices(cost: dict[tuple[str, str], float], fits: dict[tuple[str, str], Fit],
@@ -414,6 +423,7 @@ class KeyResult:
     inverted: int = 0        # parts pushed below the bass line (wrong harmony); ranks like 5 notes out of range
     part_inst: dict[str, str] = field(default_factory=dict)   # part ("Flute 2") -> instrument ("Flute")
     players: dict[str, int] = field(default_factory=dict)     # part -> players
+    crossed: int = 0         # small groups: phrases where a line sounds above the one written over it
 
     def inst(self, part: str) -> str:
         return self.part_inst.get(part, part)
@@ -472,6 +482,57 @@ def candidate_keys(counts: dict[str, int], cfg: dict, mode: str) -> list[tuple[s
 
 PARTS_MODES = ("single", "multiple")
 MAX_SECTION_PARTS = 3
+
+
+COST_OFF_SHARE = 1000   # a small group's section playing a line outside its share (see line_shares)
+
+
+def line_shares(counts: dict[str, int], cfg: dict) -> dict[str, tuple[str, ...]] | None:
+    """For a small group with fewer instrument types than lines (a tuba quartet, euphoniums and
+    tubas, horns and trombones): share the four lines out by register and by players.
+
+    Sections are ordered high to low by their natural lines; each gets at least one line,
+    the rest go in proportion to players (never more lines than players), and lines are dealt
+    out top-down in order: 4 euphoniums + 4 tubas -> euphoniums S/A, tubas T/B; 6 euphoniums +
+    2 tubas -> euphoniums S/A/T, tubas B. Returns None for larger groups, which voice normally."""
+    core = {i: n for i, n in counts.items() if INSTRUMENTS[i].family != "mallets" and n > 0}
+    target = min(len(VOICES), sum(core.values()))
+    if not core or len(core) >= target:
+        return None
+    # high to low by the lines the instrument naturally plays (horn above trombone, euphonium above
+    # tuba), then by the middle of its grade-1 range; neither changes with the grade chosen
+    rng = ranges_midi(grade_cfg("1"))
+    natural = {i: sum(VOICES.index(v) for v in INSTRUMENTS[i].prefs) / len(INSTRUMENTS[i].prefs) for i in core}
+    mid = {i: (rng[i][0] + rng[i][1]) / 2 - INSTRUMENTS[i].written_semitones for i in core}
+    order = sorted(core, key=lambda i: (natural[i], -mid[i]))
+    total = sum(core.values())
+    quota = {i: target * core[i] / total for i in order}
+    k = {i: min(core[i], max(1, int(quota[i]))) for i in order}
+    while sum(k.values()) > target:            # minimum-one rule overshot: take from the biggest share
+        i = max((i for i in order if k[i] > 1), key=lambda i: (k[i] - quota[i], k[i]))
+        k[i] -= 1
+    while sum(k.values()) < target:            # largest remainder first; ties go to the higher section
+        i = max((i for i in order if k[i] < core[i]), key=lambda i: (quota[i] - k[i], -order.index(i)))
+        k[i] += 1
+    out, at = {}, 0
+    for i in order:
+        out[i] = tuple(VOICES[at:at + k[i]])
+        at += k[i]
+    return out
+
+
+def shared_split(counts: dict[str, int], shares: dict[str, tuple[str, ...]]) -> dict[str, tuple[str, int]]:
+    """Parts for line_shares: one part per line a section was given (Euphonium 1, Euphonium 2...)."""
+    parts: dict[str, tuple[str, int]] = {}
+    for i, n in counts.items():
+        k = len(shares.get(i, ())) or 1
+        if k == 1:
+            parts[i] = (i, n)
+            continue
+        base, extra = divmod(n, k)
+        for j in range(k):
+            parts[f"{i} {j + 1}"] = (i, base + (1 if j < extra else 0))
+    return parts
 
 
 def section_split(counts: dict[str, int]) -> dict[str, tuple[str, int]]:
@@ -554,6 +615,117 @@ def _number_parts(assign: dict[str, str], inst_of: dict[str, str], players: dict
     return ({k: new_assign[k] for k in keys}, {k: new_inst[k] for k in keys}, {k: new_players[k] for k in keys})
 
 
+def _group_octaves(assign, fits_p, inst_of, notes, means, semis, rng) -> int:
+    """Small groups (a tuba quartet, euphoniums and tubas): choose the octave of all four lines
+    together, so the group moves down as one and the lines stay in order. Notes out of range
+    cost most, then phrases where a line crosses the one written above it, then phrase shifts
+    and spreading the lines apart."""
+    import itertools as _it
+    lines = [v for v in VOICES if v in assign.values()]
+    by_line = {v: [pt for pt, x in assign.items() if x == v] for v in lines}
+
+    cache: dict[tuple[str, str, int], Fit] = {}
+
+    def forced(pt: str, v: str, octave: int) -> Fit:
+        if (pt, v, octave) not in cache:
+            inst = INSTRUMENTS[inst_of[pt]]
+            lo, hi = rng[inst.name]
+            cache[pt, v, octave] = fit(notes[v], semis + inst.written_semitones, lo, hi, octave)
+        return cache[pt, v, octave]
+
+    phrase_mean = {v: {} for v in lines}
+    for v in lines:
+        acc: dict[int, list[int]] = {}
+        for n in notes[v]:
+            acc.setdefault(n.phrase, []).append(n.midi)
+        phrase_mean[v] = {ph: sum(m) / len(m) for ph, m in acc.items()}
+
+    def crossings(trial) -> int:
+        """Phrases where a line sounds above the melody or below the bass (inner lines may cross
+        each other: that doesn't change the harmony)."""
+        out = 0
+        top, bottom = lines[0], lines[-1]
+        for ph in phrase_mean[top]:
+            sound = {v: [phrase_mean[v][ph] + 12 * trial[pt, v].shift_for(ph) for pt in by_line[v]]
+                     for v in lines if ph in phrase_mean[v]}
+            if top == "S":
+                out += any(max(ms) > min(sound["S"]) for v, ms in sound.items() if v != "S")
+            if bottom == "B" and "B" in sound:
+                out += any(min(ms) < max(sound["B"]) for v, ms in sound.items() if v != "B")
+        return out
+
+    best = None
+    for combo in _it.product((1, 0, -1, -2), repeat=len(lines)):
+        trial = {}
+        score = 0.0
+        for v, o in zip(lines, combo):
+            for pt in by_line[v]:
+                f = forced(pt, v, o)
+                trial[pt, v] = f
+                score += (COST_RESIDUAL * sum(len(x) for x in f.bad.values()) + COST_PRE * f.pre_out
+                          + COST_SHIFT * len(f.phrase_shifts))
+        score += 3 * (combo[0] - combo[-1]) + 0.5 * sum(abs(o) for o in combo)   # compact, close to written
+        score += COST_OVER_MELODY * crossings(trial)
+        if best is None or score < best[0]:
+            best = (score, trial)
+    if not best:
+        return 0
+    trial = dict(best[1])
+
+    def fits_phrase(pt: str, v: str, ph: int, shift: int) -> bool:  # noqa: E306
+        inst = INSTRUMENTS[inst_of[pt]]
+        lo, hi = rng[inst.name]
+        base = semis + inst.written_semitones + 12 * shift
+        return all(lo <= n.midi + base <= hi for n in notes[v] if n.phrase == ph)
+
+    def move(line: str, ph: int, d: int) -> bool:
+        parts = [(pt, line) for pt in by_line[line]]
+        if not all(fits_phrase(pt, v, ph, trial[pt, v].shift_for(ph) + d) for pt, v in parts):
+            return False
+        for pt, v in parts:
+            f = trial[pt, v]
+            shifts = dict(f.phrase_shifts)
+            shifts[ph] = shifts.get(ph, 0) + d
+            shifts = {x: y for x, y in shifts.items() if y}
+            trial[pt, v] = Fit(f.octave, shifts, f.pre_out, f.pre_above, f.pre_below, f.bad, f.tacet, f.phrases)
+        return True
+
+    # A melody phrase that had to drop an octave takes the lines that now sound above it down too,
+    # and a bass phrase that had to rise takes the lines now under it up, where they have room.
+    for _ in range(len(lines)):
+        changed = False
+        for ph in sorted({n.phrase for v in lines for n in notes[v]}):
+            for v in lines[1:]:
+                if "S" in lines and ph in phrase_mean["S"] and ph in phrase_mean[v]:
+                    mel = min(phrase_mean["S"][ph] + 12 * trial[pt, "S"].shift_for(ph) for pt in by_line["S"])
+                    if max(phrase_mean[v][ph] + 12 * trial[pt, v].shift_for(ph) for pt in by_line[v]) > mel:
+                        changed |= move(v, ph, -1) or move("S", ph, +1)
+            for v in lines[:-1]:
+                if "B" in lines and ph in phrase_mean["B"] and ph in phrase_mean[v]:
+                    bas = max(phrase_mean["B"][ph] + 12 * trial[pt, "B"].shift_for(ph) for pt in by_line["B"])
+                    if min(phrase_mean[v][ph] + 12 * trial[pt, v].shift_for(ph) for pt in by_line[v]) < bas:
+                        changed |= move(v, ph, +1) or move("B", ph, -1)
+        if not changed:
+            break
+    for (pt, v), f in trial.items():
+        fits_p[pt, v] = _fold(f, lambda o, pt=pt, v=v: forced(pt, v, o))
+    return crossings(trial)
+
+
+def _fold(f: Fit, refit) -> Fit:
+    """Report 'whole part down an octave' rather than 'two octaves down, every phrase back up one':
+    when one phrase shift covers more than half the phrases, make it the whole-part octave.
+    The notes played are unchanged."""
+    from collections import Counter
+    eff = Counter(f.phrase_shifts.get(ph, 0) for ph in range(f.phrases))
+    q, n = eff.most_common(1)[0]
+    if q == 0 or 2 * n <= f.phrases:
+        return f
+    g = refit(f.octave + q)
+    shifts = {ph: f.phrase_shifts.get(ph, 0) - q for ph in range(f.phrases) if f.phrase_shifts.get(ph, 0) != q}
+    return Fit(g.octave, shifts, g.pre_out, g.pre_above, g.pre_below, f.bad, f.tacet, f.phrases)
+
+
 def _keep_melody_on_top(assign, fits_p, inst_of, notes, means, semis, rng) -> None:
     """Keep the lines in order after voicing: nothing above the melody, nothing below the bass.
 
@@ -612,7 +784,20 @@ def part_label(inst: Inst, part: str) -> str:
 
 def evaluate_key(notes: dict[str, list[NoteRef]], mode: str, orig_tonic: str, counts: dict[str, int], cfg: dict,
                  spelled: str, off: dict[str, int], parts_mode: str = "single") -> KeyResult:
-    """Voice and fit the roster for one concert key (tonic in music21 spelling, e.g. 'B-')."""
+    """Voice and fit the roster for one concert key (tonic in music21 spelling, e.g. 'B-').
+
+    Small groups share the lines by register (line_shares) unless the ordinary voicing keeps
+    more notes in range, e.g. horns and trombones at grade 1, where trombones taking the alto
+    line an octave down is playable and horns there are not."""
+    kr = _evaluate_key(notes, mode, orig_tonic, counts, cfg, spelled, off, parts_mode, True)
+    if line_shares(counts, cfg) and kr.residual:
+        plain = _evaluate_key(notes, mode, orig_tonic, counts, cfg, spelled, off, parts_mode, False)
+        if plain.residual < kr.residual:
+            return plain
+    return kr
+
+
+def _evaluate_key(notes, mode, orig_tonic, counts, cfg, spelled, off, parts_mode, use_shares) -> KeyResult:
     rng = ranges_midi(cfg)
     n_phrases = max((n.phrase for v in VOICES for n in notes[v]), default=0) + 1
     mean = {v: sum(n.midi for n in notes[v]) / max(len(notes[v]), 1) for v in VOICES}
@@ -620,6 +805,8 @@ def evaluate_key(notes: dict[str, list[NoteRef]], mode: str, orig_tonic: str, co
     fits: dict[tuple[str, str], Fit] = {}
     cost: dict[tuple[str, str], float] = {}
     below: set[tuple[str, str]] = set()
+    # a lone player only takes the melody, so there is no bass line to sound below
+    has_bass = sum(n for i, n in counts.items() if INSTRUMENTS[i].family != "mallets") >= 2
     for name in counts:
         inst = INSTRUMENTS[name]
         lo, hi = rng[name]
@@ -627,18 +814,21 @@ def evaluate_key(notes: dict[str, list[NoteRef]], mode: str, orig_tonic: str, co
             f = fit(notes[v], semis + inst.written_semitones, lo, hi)
             fits[name, v] = f
             cost[name, v] = f.cost + pref_cost(inst, v)
-            if v != "B" and mean[v] + 12 * f.octave < mean["B"] + BELOW_BASS_MARGIN:
+            if has_bass and v != "B" and mean[v] + 12 * f.level < mean["B"] + BELOW_BASS_MARGIN:
                 cost[name, v] += COST_BELOW_BASS
                 below.add((name, v))
     best_opt = None
-    for parts in split_options(counts, parts_mode):
+    shares = line_shares(counts, cfg) if use_shares else None
+    options = [shared_split(counts, shares)] if shares else split_options(counts, parts_mode)
+    for parts in options:
         inst_of = {pt: i for pt, (i, _) in parts.items()}
         pc = {pt: n for pt, (_, n) in parts.items()}
-        cost_p = {(pt, v): cost[i, v] for pt, i in inst_of.items() for v in VOICES}
+        cost_p = {(pt, v): cost[i, v] + (COST_OFF_SHARE if shares and i in shares and v not in shares[i] else 0)
+                  for pt, i in inst_of.items() for v in VOICES}
         fits_p = {(pt, v): fits[i, v] for pt, i in inst_of.items() for v in VOICES}
         real_bass = {pt: fits[i, "B"].octave <= 0 for pt, i in inst_of.items()}
         below_p = {(pt, v) for pt, i in inst_of.items() for v in VOICES if (i, v) in below}
-        natural = parts_mode == "multiple" and any(pt != i for pt, i in inst_of.items())
+        natural = parts_mode == "multiple" and not shares and any(pt != i for pt, i in inst_of.items())
         try:
             assign, total = assign_voices(cost_p, fits_p, pc, n_phrases, real_bass, inst_of, mean, below_p,
                                           natural_lines=natural)
@@ -651,15 +841,63 @@ def evaluate_key(notes: dict[str, list[NoteRef]], mode: str, orig_tonic: str, co
     assign, total, inst_of, pc = best_opt
     assign, inst_of, pc = _number_parts(assign, inst_of, pc)
     fits_p = {(pt, v): fits[inst_of[pt], v] for pt in assign for v in VOICES}
-    _keep_melody_on_top(assign, fits_p, inst_of, notes, mean, semis, rng)
+    crossed = 0
+    if shares:
+        crossed = _group_octaves(assign, fits_p, inst_of, notes, mean, semis, rng)
+    else:
+        _keep_melody_on_top(assign, fits_p, inst_of, notes, mean, semis, rng)
     _, tacet, _ = phrase_plan(assign, fits_p, n_phrases)
     chosen = {}
     for pt, v in assign.items():
         f = fits_p[pt, v]
-        chosen[pt] = Fit(f.octave, f.phrase_shifts, f.pre_out, f.pre_above, f.pre_below, f.bad, tacet[pt])
-    total += COST_KEY_MOVE * abs(semis) + COST_KEY_FAMILY * sum(off.values())
+        chosen[pt] = Fit(f.octave, f.phrase_shifts, f.pre_out, f.pre_above, f.pre_below, f.bad, tacet[pt],
+                         f.phrases)
+    if parts_mode == "multiple":
+        assign, chosen, inst_of, pc = _octave_divisi(assign, chosen, inst_of, pc, notes, semis, rng,
+                                                     allow_up=not shares)
+        fits_p = {(pt, assign[pt]): chosen[pt] for pt in assign}
+    total += COST_KEY_MOVE * abs(semis) + COST_KEY_FAMILY * sum(off.values()) + COST_OVER_MELODY * crossed
     inverted = {pt for pt, v in assign.items() if (inst_of[pt], v) in below} | inversions(assign, fits_p, mean)
-    return KeyResult(spelled, mode, semis, assign, chosen, total, off, len(inverted), inst_of, pc)
+    return KeyResult(spelled, mode, semis, assign, chosen, total, off, len(inverted), inst_of, pc, crossed)
+
+
+def _octave_divisi(assign, chosen, inst_of, pc, notes, semis, rng, allow_up: bool = True):
+    """'Split sections' for a low section that only suits one line (tuba, bari sax, string bass):
+    with two or more players it divides into two parts on that line, in octaves the way band
+    tubas do. Part 2 goes an octave below part 1 if that leaves no extra notes out of range
+    (phrases that can't go down rejoin part 1, at most half of them); otherwise part 1 goes an
+    octave above part 2; failing both, the two parts play in unison."""
+    out_a, out_c, out_i, out_p = {}, {}, {}, {}
+    for pt, v in assign.items():
+        i = inst_of[pt]
+        inst = INSTRUMENTS[i]
+        f = chosen[pt]
+        if pt != i or len(inst.prefs) != 1 or not inst.low or pc[pt] < 2:
+            out_a[pt], out_c[pt], out_i[pt], out_p[pt] = v, f, i, pc[pt]
+            continue
+        lo, hi = rng[i]
+        base = semis + inst.written_semitones
+        phrases = sorted({n.phrase for n in notes[v]})
+        resid = lambda g: sum(len(x) for x in g.bad.values())
+        apart = lambda hi, lo: sum(1 for ph in phrases if hi.octave + hi.phrase_shifts.get(ph, 0)
+                                   > lo.octave + lo.phrase_shifts.get(ph, 0))
+        # no extra notes out of range, and an octave apart in at least half the phrases
+        ok_low = lambda g: resid(g) <= resid(f) and 2 * apart(f, g) >= len(phrases)
+        ok_high = lambda g: resid(g) <= resid(f) and 2 * apart(g, f) >= len(phrases)
+        top, bottom = f, f
+        lower = fit(notes[v], base, lo, hi, octave=f.octave - 1)
+        upper = fit(notes[v], base, lo, hi, octave=f.octave + 1)
+        if ok_low(lower):
+            bottom = lower
+        elif allow_up and ok_high(upper):   # (not in small groups: it would climb over the line above)
+            top = upper
+        n1 = (pc[pt] + 1) // 2
+        for name, g, n in ((f"{i} 1", top, n1), (f"{i} 2", bottom, pc[pt] - n1)):
+            out_a[name] = v
+            out_c[name] = Fit(g.octave, g.phrase_shifts, g.pre_out, g.pre_above, g.pre_below, g.bad, f.tacet,
+                              g.phrases)
+            out_i[name], out_p[name] = i, n
+    return out_a, out_c, out_i, out_p
 
 
 def chorale_mode(ch: Chorale) -> str:
@@ -670,9 +908,17 @@ def search_keys(ch: Chorale, counts: dict[str, int], cfg: dict, parts_mode: str 
     """Try every concert key the grade allows for this roster; best first."""
     mode = chorale_mode(ch)
     notes = {v: voice_notes(ch, v) for v in VOICES}
-    results = [evaluate_key(notes, mode, ch.key.tonic.name, counts, cfg, spelled, off, parts_mode)
-               for spelled, off in candidate_keys(counts, cfg, mode)]
+    keys = candidate_keys(counts, cfg, mode)
+    results = [_evaluate_key(notes, mode, ch.key.tonic.name, counts, cfg, spelled, off, parts_mode, True)
+               for spelled, off in keys]
     results.sort(key=lambda r: r.rank)
+    if line_shares(counts, cfg) and results[0].residual:
+        # no key keeps a small group playable with lines shared by register: if the ordinary
+        # voicing (which may swap inner lines between sections) leaves fewer notes out, use it
+        plain = sorted((_evaluate_key(notes, mode, ch.key.tonic.name, counts, cfg, spelled, off, parts_mode, False)
+                        for spelled, off in keys), key=lambda r: r.rank)
+        if plain[0].residual < results[0].residual:
+            results = plain
     return results
 
 
@@ -1038,8 +1284,16 @@ def arrange(chorale_id: str, counts: dict[str, int], grade: str | float, with_pa
         if pt != i:
             split.setdefault(i, []).append(pt)
     def _desc(pts: list[str]) -> str:
-        return ", ".join(f"{pt} on {VOICE_NAMES[best.assign[pt]].lower()} ({_plural(best.players[pt], 'player')})"
-                         for pt in pts)
+        out = []
+        for pt in pts:
+            same = [q for q in pts if q != pt and best.assign[q] == best.assign[pt]]
+            how = ""
+            if same and best.fits[pt].octave < best.fits[same[0]].octave:
+                how = ", an octave lower"
+            elif same and best.fits[pt].octave == best.fits[same[0]].octave and pt.endswith(" 2"):
+                how = ", in unison (an octave apart would leave notes out of range)"
+            out.append(f"{pt} on {VOICE_NAMES[best.assign[pt]].lower()} ({_plural(best.players[pt], 'player')}{how})")
+        return ", ".join(out)
     if parts_mode == "multiple" and split:
         notes.append("Sections are split into numbered parts: "
                      + "; ".join(_desc(pts) for pts in split.values()) + ".")
@@ -1047,6 +1301,10 @@ def arrange(chorale_id: str, counts: dict[str, int], grade: str | float, with_pa
         for i, pts in split.items():
             notes.append(f"Not enough instrument types to cover all four lines, so the {i.lower()} section is split "
                          f"into {len(pts)} parts: {_desc(pts)}.")
+    if best.crossed:
+        warnings.append(f"The ranges don't leave room for all four lines in "
+                        f"{_plural(best.crossed, 'phrase')}, so there one line sounds above the line written over it. "
+                        f"Check the fit report for the phrase shifts, or try another grade.")
     if best.inverted:
         means = {v: sum(n.midi for n in voice_notes(ch, v)) / max(len(voice_notes(ch, v)), 1) for v in VOICES}
         fp = {(pt, v): best.fits[pt] for pt, v in best.assign.items()}

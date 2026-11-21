@@ -140,6 +140,10 @@ Everything lives in [`data/grades.json`](data/grades.json) — plain JSON you ca
 "Violin": ["G3", "B5"],
 ```
 
+### Brass choirs and small groups
+
+With fewer instrument types than lines, the four lines are shared out by register and by number of players, top-down: a tuba quartet gets Tuba 1–4 on soprano to bass; 4 euphoniums + 4 tubas gives euphoniums soprano/alto and tubas tenor/bass; 6 euphoniums + 2 tubas gives euphoniums soprano/alto/tenor and tubas bass. In *split sections*, a low section that only suits the bass line (tuba, bari sax, string bass) with two or more players divides into two parts an octave apart where the range allows.
+
 ## 💻 Run it locally
 
 You need **[uv](https://docs.astral.sh/uv/)** (it installs Python 3.12 for you).
